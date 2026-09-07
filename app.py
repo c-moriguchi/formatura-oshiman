@@ -129,7 +129,8 @@ table.tbl td.empty { text-align:center; color:#8a877e; padding:14px; }
 #MainMenu, footer { visibility:hidden; }
 .stButton > button { width:100%; border-radius:8px !important;
     padding:.55rem 1rem !important; font-size:14px !important; }
-.stTabs [data-baseweb="tab"] { font-size:13px; }
+.stTabs [data-baseweb="tab"] { font-size:13px; color:#374151; }
+.stTabs [data-baseweb="tab"][aria-selected="true"] { color:#1b4332; font-weight:700; }
 
 /* Mobile-first */
 @media (max-width: 640px) {

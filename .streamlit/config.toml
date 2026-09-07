@@ -1,0 +1,16 @@
+# Força o Streamlit/baseweb a usar SEMPRE o tema claro, independente do modo
+# escuro do SO. Sem isso, se o sistema estiver em dark mode, o texto dos menus
+# (abas, selects, inputs) fica claro sobre o fundo claro do app -> invisível.
+# Vale local E no deploy (Community Cloud lê este arquivo do repo).
+[theme]
+base = "light"
+primaryColor = "#1b4332"          # verde da comissão
+backgroundColor = "#f7f6f3"       # mesmo fundo do CSS
+secondaryBackgroundColor = "#ffffff"
+textColor = "#1f2937"
+
+[server]
+runOnSave = false
+
+[browser]
+gatherUsageStats = false
