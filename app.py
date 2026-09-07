@@ -87,6 +87,13 @@ st.markdown("""
 .aluno-nome  { font-weight:600; font-size:15px; margin-bottom:2px; }
 .aluno-nome-inativo { font-weight:500; font-size:15px; margin-bottom:2px; color:#8a877e; }
 .aluno-sub   { font-size:12px; color:#8a877e; margin-bottom:8px; }
+.wa-ico { text-decoration:none; margin-left:7px; font-size:16px; opacity:.85; }
+.wa-ico:hover { opacity:1; }
+
+.progress { height:8px; background:#e9e7e0; border-radius:6px;
+    overflow:hidden; margin:6px 0 12px; }
+.progress > div { height:100%; background:#2d6a4f; border-radius:6px; }
+.progress-hint { font-size:12px; color:#8a877e; margin-bottom:10px; }
 
 .badge { display:inline-block; padding:3px 10px; border-radius:20px;
     font-size:12px; font-weight:600; }
@@ -178,6 +185,14 @@ def cards(*itens):
 def wa_link(cel: str, msg: str) -> str:
     num = re.sub(r"\D", "", cel or "")
     return f"https://wa.me/55{num}?text={urllib.parse.quote(msg)}"
+
+
+def wa_icon(cel, msg, enabled: bool) -> str:
+    """Icone 📲 clicável de WhatsApp, colocado na frente do nome do aluno."""
+    if not (enabled and cel):
+        return ""
+    return (f'<a class="wa-ico" href="{wa_link(cel, msg)}" '
+            f'target="_blank" rel="noopener" title="Abrir WhatsApp">📲</a>')
 
 
 # ─── ACESSO A DADOS ─────────────────────────────────────────────────────────
@@ -533,22 +548,27 @@ with tabs[1]:
         ("Ainda não pagaram", str(len(nao_pagaram)), "orange"),
         ("Total ativos", str(len(ativos)), "blue"),
     )
+    if ativos:
+        pct = len(pagaram) / len(ativos) * 100
+        st.markdown(
+            f'<div class="progress"><div style="width:{pct:.0f}%"></div></div>'
+            f'<div class="progress-hint">{pct:.0f}% dos integrantes já pagaram '
+            f'{F.fmt_mes(hoje_ym)} · prazo até dia 30.</div>',
+            unsafe_allow_html=True)
 
     if nao_pagaram:
-        st.markdown("**Ainda não pagaram este mês:**")
+        st.markdown("**Ainda não pagaram este mês (lembrete):**")
         for a in nao_pagaram:
             msg = (f"Olá! Passando para lembrar da mensalidade de {F.fmt_mes(hoje_ym)} "
                    f"da Formatura. 🎓")
+            ic = wa_icon(a.get("celular"), msg, is_admin)
             st.markdown(f"""
             <div class="aluno-card">
-              <div class="aluno-nome">{a['nome']}</div>
+              <div class="aluno-nome">{a['nome']}{ic}</div>
               <div class="aluno-sub">ID {a['id']} · Turma {a['turma']}</div>
-              <span class="badge badge-warn">Não pagou {F.fmt_mes(hoje_ym)}</span>
+              <span class="badge badge-warn">⏳ Pagar até 30/{hoje_ym[5:7]}</span>
             </div>
             """, unsafe_allow_html=True)
-            if is_admin and a.get("celular"):
-                st.link_button(f"📲 Lembrete WhatsApp — {a['nome'].split()[0]}",
-                               wa_link(a["celular"], msg))
 
     if pagaram:
         st.markdown("**Já pagaram:**")
@@ -574,6 +594,12 @@ with tabs[2]:
     else:
         st.markdown(f'<div class="sec-title">Situação — até {F.fmt_mes(ultimo_fechado)}</div>',
                     unsafe_allow_html=True)
+        st.markdown(
+            '<div class="info-box"><b>Devedor</b> = quem está com algum <b>mês já '
+            'fechado</b> em aberto (até ' + F.fmt_mes(ultimo_fechado)
+            + '). Quem pagou em dia até o último fechamento não deve. '
+            'A janela em aberto aparece na aba 📋 Mês corrente.</div>',
+            unsafe_allow_html=True)
 
         ativos = [a for a in alunos if a["status"] == "Ativo"]
         inativos = [a for a in alunos if a["status"] == "Inativo"]
@@ -613,22 +639,20 @@ with tabs[2]:
                               f'{calc["adiantados"]} {"mês" if calc["adiantados"]==1 else "meses"} adiant.</span>'
                               if calc["adiantados"] > 0 else "")
                 badge = f'<span class="badge badge-green">Em dia</span>{adiant_str}'
+                ic = ""
             else:
                 badge = f'<span class="badge badge-red">Deve {F.fmt_brl(abs(saldo))}</span>'
+                msg = (f"Olá! Consta um débito de {F.fmt_brl(abs(saldo))} dos meses "
+                       f"já fechados da Formatura. Podemos confirmar o pagamento? 🎓")
+                ic = wa_icon(a.get("celular"), msg, is_admin)
 
             st.markdown(f"""
             <div class="aluno-card">
-              <div class="aluno-nome">{a['nome']}</div>
+              <div class="aluno-nome">{a['nome']}{ic}</div>
               <div class="aluno-sub">ID {a['id']} · Turma {a['turma']} · {detalhe}</div>
               {badge}
             </div>
             """, unsafe_allow_html=True)
-
-            if saldo < 0 and is_admin and a.get("celular"):
-                msg = (f"Olá! Consta um débito de {F.fmt_brl(abs(saldo))} referente "
-                       f"às mensalidades da Formatura. Podemos confirmar o pagamento? 🎓")
-                st.link_button(f"📲 Cobrar {F.fmt_brl(abs(saldo))} — {a['nome'].split()[0]}",
-                               wa_link(a["celular"], msg))
 
         if inativos and filtro == "Todos":
             st.markdown('<div class="sec-title">Desistentes</div>', unsafe_allow_html=True)

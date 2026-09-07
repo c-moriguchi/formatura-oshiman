@@ -129,13 +129,18 @@ def _gera_dados():
                   "categoria": "RESGATE", "aluno_id": None, "observacao": ""})
     data["transacoes"] = trans
 
-    # fechamentos: 2026-05 confirmado, 2026-06 draft
+    # fechamentos: meses passados confirmados (o draft do mês anterior é criado
+    # automaticamente pelo app na primeira execução)
     data["fechamentos"] = [
         {"ano_mes": "2026-05", "status": "confirmado",
          "criado_em": "2026-06-01T10:00:00", "confirmado_em": "2026-06-05T10:00:00",
          "confirmado_por": "Tesouraria"},
-        {"ano_mes": "2026-06", "status": "draft",
-         "criado_em": "2026-07-01T10:00:00", "confirmado_em": None, "confirmado_por": None},
+        {"ano_mes": "2026-06", "status": "confirmado",
+         "criado_em": "2026-07-01T10:00:00", "confirmado_em": "2026-07-05T10:00:00",
+         "confirmado_por": "Tesouraria"},
+        {"ano_mes": "2026-07", "status": "confirmado",
+         "criado_em": "2026-08-01T10:00:00", "confirmado_em": "2026-08-05T10:00:00",
+         "confirmado_por": "Tesouraria"},
     ]
     # orcamento
     data["orcamento"] = [
