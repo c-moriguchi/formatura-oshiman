@@ -1,44 +1,71 @@
-import streamlit as st
-import pandas as pd
-import datetime
-import urllib.parse
-import re
+import os
 import io
 import csv
+import re
+import datetime
+import urllib.parse
+
+import streamlit as st
+import pandas as pd
 import requests
-from supabase import create_client, Client
+
+from supabase import create_client
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
-                                 Table, TableStyle, HRFlowable)
+from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
+                                TableStyle, HRFlowable)
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-# ─── PAGE CONFIG ─────────────────────────────────────────────
-st.set_page_config(
-    page_title="Formatura Oshiman 2028",
-    layout="centered",
-    page_icon="🎓",
-    initial_sidebar_state="collapsed",
-)
+import financeiro as F
 
-# ─── SUPABASE (service_role — nunca exposta ao browser) ──────
+# ─── CONFIGURAÇÃO (nomes/ano fora do código) ─────────────────────────────────
+def _secrets_get(key: str, default=""):
+    """Leitura segura de secrets: retorna default quando não há secrets configurados
+    (ex.: modo demonstração ou máquina sem ~/.streamlit/secrets.toml)."""
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
+
+@st.cache_data
+def config() -> dict:
+    return {
+        "nome_comissao": _secrets_get("NOME_COMISSAO", "Formatura Oshiman 2028"),
+        "nome_curto": _secrets_get("NOME_CURTO", "Oshiman 2028"),
+    }
+CFG = config()
+
+# ─── PAGE CONFIG ────────────────────────────────────────────────────────────
+st.set_page_config(page_title=CFG["nome_curto"], layout="centered",
+                   page_icon="🎓", initial_sidebar_state="collapsed")
+
+# ─── SUPABASE (service_role — nunca exposta ao browser) ─────────────────────
+def _demo_ativo() -> bool:
+    if os.environ.get("DEMO") == "1":
+        return True
+    return not (_secrets_get("SUPABASE_URL") and _secrets_get("SUPABASE_SERVICE_KEY"))
+
+
 @st.cache_resource
-def get_supabase() -> Client:
-    return create_client(
-        st.secrets["SUPABASE_URL"],
-        st.secrets["SUPABASE_SERVICE_KEY"],
-    )
+def get_supabase():
+    if _demo_ativo():
+        import mock_db
+        return mock_db.create_mock_client()
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_SERVICE_KEY"])
 
-def db() -> Client:
+
+def db():
     return get_supabase()
 
-# ─── CSS ─────────────────────────────────────────────────────
+
+# ─── CSS ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 [data-testid="stAppViewContainer"] { background:#f7f6f3; }
 [data-testid="stHeader"]  { display:none; }
 [data-testid="stSidebar"] { display:none; }
-.block-container { padding:1rem 1rem 4rem; max-width:700px; }
+.block-container { padding:1rem 1rem 4rem; max-width:760px; }
 
 .stat-row { display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap; }
 .stat-card { flex:1; min-width:130px; background:white;
@@ -49,6 +76,7 @@ st.markdown("""
 .green  { color:#2d6a4f; }
 .red    { color:#b91c1c; }
 .orange { color:#92400e; }
+.blue   { color:#1e40af; }
 
 /* Card de aluno ativo */
 .aluno-card { background:white; border:1px solid #e2e0d8;
@@ -87,51 +115,91 @@ st.markdown("""
 .draft-box h4 { margin:0 0 6px; color:#78350f; font-size:15px; }
 .draft-box p  { margin:0; font-size:13px; color:#92400e; }
 
+/* Tabela HTML responsiva (substitui st.dataframe no mobile) */
+.table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; border-radius:8px; }
+table.tbl { width:100%; border-collapse:collapse; background:white;
+    font-size:13px; border:1px solid #e2e0d8; min-width:520px; }
+table.tbl th { background:#1b4332; color:white; padding:8px 10px; text-align:left;
+    font-size:12px; font-weight:600; }
+table.tbl td { padding:8px 10px; border-bottom:1px solid #eee9e0; }
+table.tbl td.num, table.tbl th.num { text-align:right; }
+table.tbl tr:nth-child(even) td { background:#faf8f4; }
+table.tbl td.empty { text-align:center; color:#8a877e; padding:14px; }
+
 #MainMenu, footer { visibility:hidden; }
 .stButton > button { width:100%; border-radius:8px !important;
     padding:.55rem 1rem !important; font-size:14px !important; }
 .stTabs [data-baseweb="tab"] { font-size:13px; }
+
+/* Mobile-first */
+@media (max-width: 640px) {
+  .block-container { padding:.6rem .6rem 3rem; }
+  .stat-card { min-width:calc(50% - 10px); padding:12px 8px; }
+  .stat-card .lbl { font-size:10px; }
+  .stat-card .val { font-size:18px; }
+  .top-nav { padding:10px 12px; }
+  table.tbl { font-size:12px; min-width:0; }
+  table.tbl td, table.tbl th { padding:7px 8px; }
+  .stTabs [data-baseweb="tab"] { font-size:12px; }
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ═════════════════════════════════════════════════════════════
-# HELPERS DE DATA
-# ═════════════════════════════════════════════════════════════
 
-def current_ym() -> str:
-    d = datetime.date.today()
-    return f"{d.year}-{d.month:02d}"
+# ─── HELPERS DE TELA ────────────────────────────────────────────────────────
+def render_table(headers, rows, right_align=(), empty="Nenhum dado.") -> str:
+    """Tabela HTML responsiva — funciona bem no celular, ao contrário de st.dataframe."""
+    thead = "".join(
+        f'<th class="num">{h}</th>' if i in right_align else f"<th>{h}</th>"
+        for i, h in enumerate(headers))
+    body = ""
+    for r in rows:
+        tds = []
+        for ci, val in enumerate(r):
+            cls = ' class="num"' if ci in right_align else ""
+            tds.append(f"<td{cls}>{val}</td>")
+        body += "<tr>" + "".join(tds) + "</tr>"
+    if not rows:
+        body = f'<tr><td class="empty" colspan="{len(headers)}">{empty}</td></tr>'
+    return (f'<div class="table-wrap"><table class="tbl">'
+            f"<thead><tr>{thead}</tr></thead>"
+            f"<tbody>{body}</tbody></table></div>")
 
-def prev_ym(ym: str) -> str:
-    y, m = int(ym[:4]), int(ym[5:7])
-    return f"{y-1}-12" if m == 1 else f"{y}-{m-1:02d}"
 
-def next_ym(ym: str) -> str:
-    y, m = int(ym[:4]), int(ym[5:7])
-    return f"{y+1}-01" if m == 12 else f"{y}-{m+1:02d}"
+def cards(*itens):
+    """itens: (lbl, val, cor)."""
+    html = '<div class="stat-row">' + "".join(
+        f'<div class="stat-card"><div class="lbl">{l}</div>'
+        f'<div class="val {c}">{v}</div></div>' for l, v, c in itens) + "</div>"
+    st.markdown(html, unsafe_allow_html=True)
 
-def fmt_mes(ym: str) -> str:
-    MESES = ["Jan","Fev","Mar","Abr","Mai","Jun",
-             "Jul","Ago","Set","Out","Nov","Dez"]
-    y, m = int(ym[:4]), int(ym[5:7])
-    return f"{MESES[m-1]}/{y}"
 
-def fmt_brl(v: float) -> str:
-    s = f"{abs(v):,.2f}".replace(",","X").replace(".",",").replace("X",".")
-    return f"R$ {s}"
+def wa_link(cel: str, msg: str) -> str:
+    num = re.sub(r"\D", "", cel or "")
+    return f"https://wa.me/55{num}?text={urllib.parse.quote(msg)}"
 
-# ═════════════════════════════════════════════════════════════
-# FECHAMENTOS — lógica central
-# ═════════════════════════════════════════════════════════════
+
+# ─── ACESSO A DADOS ─────────────────────────────────────────────────────────
+def get_periodos():
+    rows = db().table("periodos").select("de,valor").order("de").execute().data
+    return [(r["de"], float(r["valor"])) for r in rows]
+
+
+def get_alunos():
+    return db().table("alunos").select("*").order("turma").order("id").execute().data
+
+
+def get_transacoes():
+    return db().table("transacoes").select(
+        "id,data,descricao,valor,categoria,aluno_id,observacao"
+    ).order("data", desc=True).execute().data
+
 
 def get_ultimo_mes_fechado() -> str | None:
-    """Retorna o YYYY-MM do último mês com status='confirmado'."""
-    rows = db().table("fechamentos") \
-        .select("ano_mes") \
-        .eq("status", "confirmado") \
-        .order("ano_mes", desc=True) \
-        .limit(1).execute().data
+    rows = db().table("fechamentos").select("ano_mes").eq("status", "confirmado") \
+        .order("ano_mes", desc=True).limit(1).execute().data
     return rows[0]["ano_mes"] if rows else None
+
 
 def get_fechamento(ym: str) -> dict | None:
     try:
@@ -141,18 +209,17 @@ def get_fechamento(ym: str) -> dict | None:
         st.error(f"Erro ao conectar no Supabase: {e}")
         st.stop()
 
+
 def garantir_draft_mes_anterior():
-    mes_anterior = prev_ym(current_ym())
-    existente = get_fechamento(mes_anterior)
-    if not existente:
+    mes_anterior = F.prev_ym(F.current_ym())
+    if not get_fechamento(mes_anterior):
         try:
-            db().table("fechamentos").insert({
-                "ano_mes": mes_anterior,
-                "status": "draft",
-            }).execute()
+            db().table("fechamentos").insert(
+                {"ano_mes": mes_anterior, "status": "draft"}).execute()
         except Exception as e:
             st.error(f"Erro ao criar draft: {e}")
             st.stop()
+
 
 def confirmar_fechamento(ym: str, usuario: str):
     db().table("fechamentos").update({
@@ -161,291 +228,142 @@ def confirmar_fechamento(ym: str, usuario: str):
         "confirmado_por": usuario,
     }).eq("ano_mes", ym).execute()
 
-# ═════════════════════════════════════════════════════════════
-# FINANCEIRO
-# ═════════════════════════════════════════════════════════════
 
-def get_periodos():
-    rows = db().table("periodos").select("de,valor").order("de").execute().data
-    return [(r["de"], float(r["valor"])) for r in rows]
+def quem_pagou_no_mes(ym: str) -> set:
+    """Uma query só: conjunto de aluno_id com mensalidade no mês (corrige N+1)."""
+    rows = db().table("transacoes").select("aluno_id").eq("categoria", "MENSALIDADE") \
+        .like("data", f"{ym}%").execute().data
+    return {r["aluno_id"] for r in rows if r["aluno_id"]}
 
-def get_valor_mes(periodos, ym: str) -> float:
-    v = 0.0
-    for de, val in periodos:
-        if ym >= de:
-            v = val
-        else:
-            break
-    return v
 
-def get_meta_acumulada(periodos, aluno: dict, ate_ym: str) -> float:
-    """
-    Meta até ate_ym, respeitando:
-    - Início no primeiro período configurado
-    - Teto = min(ate_ym, mês da desistência) para desistentes
-    """
-    if not periodos:
-        return 0.0
-    inicio = periodos[0][0]
-    teto = ate_ym
-    if aluno.get("data_desistencia"):
-        des_ym = aluno["data_desistencia"][:7]
-        if des_ym < teto:
-            teto = des_ym
-    total, cur = 0.0, inicio
-    while cur <= teto:
-        total += get_valor_mes(periodos, cur)
-        cur = next_ym(cur)
-    return total
+def get_orcamento():
+    return db().table("orcamento").select("id,descricao,data,valor").order("data").execute().data
 
-def carregar_transacoes_agrupadas():
-    """
-    Uma query: retorna dict {aluno_id: {mensalidade, devolucao}}
-    Devoluções são tratadas separadamente — nunca compõem o saldo geral.
-    """
-    rows = db().table("transacoes") \
-        .select("aluno_id,valor,categoria") \
-        .in_("categoria", ["MENSALIDADE","DEVOLUCAO"]) \
-        .execute().data
-    result: dict[str, dict] = {}
-    for r in rows:
-        aid = r["aluno_id"]
-        if not aid:
-            continue
-        if aid not in result:
-            result[aid] = {"mensalidade": 0.0, "devolucao": 0.0}
-        if r["categoria"] == "MENSALIDADE":
-            result[aid]["mensalidade"] += float(r["valor"])
-        else:
-            result[aid]["devolucao"] += abs(float(r["valor"]))
-    return result
 
-def get_meses_adiantados(periodos, credito: float, ate_ym: str) -> int:
-    if credito <= 0:
-        return 0
-    cur, restante, count = next_ym(ate_ym), credito, 0
-    while restante > 0 and count < 60:
-        v = get_valor_mes(periodos, cur)
-        if v == 0:
-            break
-        if restante >= v:
-            restante -= v; count += 1; cur = next_ym(cur)
-        else:
-            break
-    return count
-
-def calcular_aluno(aluno, periodos, trans, ate_ym: str) -> dict:
-    """
-    Retorna dict com todos os campos financeiros de um aluno.
-
-    Para desistentes:
-      - total_pago   = tudo que pagou (independente do mês)
-      - devolucao    = o que já foi devolvido
-      - dev_pendente = total_pago - devolucao  (o que ainda falta devolver)
-      - Devoluções NÃO entram no saldo geral do caixa
-
-    Para ativos:
-      - meta         = acumulado até ate_ym
-      - saldo        = total_pago - meta  (positivo=crédito, negativo=débito)
-      - adiantados   = meses cobertos pelo crédito extra
-    """
-    t = trans.get(aluno["id"], {"mensalidade": 0.0, "devolucao": 0.0})
-    total_pago  = t["mensalidade"]
-    devolucao   = t["devolucao"]
-
-    if aluno["status"] == "Inativo":
-        dev_pendente = max(0.0, total_pago - devolucao)
-        return {
-            "total_pago":   total_pago,
-            "devolucao":    devolucao,
-            "dev_pendente": dev_pendente,
-            "meta":         0.0,
-            "saldo":        0.0,
-            "adiantados":   0,
-        }
-
-    meta   = get_meta_acumulada(periodos, aluno, ate_ym)
-    saldo  = total_pago - meta
-    adiant = get_meses_adiantados(periodos, saldo, ate_ym)
-    return {
-        "total_pago":   total_pago,
-        "devolucao":    0.0,
-        "dev_pendente": 0.0,
-        "meta":         meta,
-        "saldo":        saldo,
-        "adiantados":   adiant,
-    }
-
-def pagou_mes_corrente(aluno_id: str, ym: str) -> bool:
-    """Verifica se houve mensalidade no mês YYYY-MM."""
-    rows = db().table("transacoes") \
-        .select("id") \
-        .eq("aluno_id", aluno_id) \
-        .eq("categoria", "MENSALIDADE") \
-        .like("data", f"{ym}%") \
-        .execute().data
-    return len(rows) > 0
-
-# ═════════════════════════════════════════════════════════════
-# WHATSAPP (Meta Cloud API — gratuito)
-# ═════════════════════════════════════════════════════════════
-
+# ─── WHATSAPP (Meta Cloud API — gratuito) ───────────────────────────────────
 def enviar_whatsapp(para: str, mensagem: str) -> bool:
-    """Envia mensagem via Meta WhatsApp Cloud API."""
-    token    = st.secrets.get("WA_TOKEN", "")
-    phone_id = st.secrets.get("WA_PHONE_ID", "")
+    token = _secrets_get("WA_TOKEN")
+    phone_id = _secrets_get("WA_PHONE_ID")
     if not token or not phone_id:
         return False
-    numero = re.sub(r"\D", "", para)
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": numero,
-        "type": "text",
-        "text": {"body": mensagem},
-    }
+    num = re.sub(r"\D", "", para)
     resp = requests.post(
         f"https://graph.facebook.com/v19.0/{phone_id}/messages",
         headers={"Authorization": f"Bearer {token}",
                  "Content-Type": "application/json"},
-        json=payload,
+        json={"messaging_product": "whatsapp", "to": num, "type": "text",
+              "text": {"body": mensagem}},
         timeout=10,
     )
     return resp.status_code == 200
 
+
 def notificar_tesoureiras(assunto: str, corpo: str):
-    numeros = [n.strip() for n in
-               st.secrets.get("TESOUREIRAS_WA", "+5511982159674").split(",")]
-    ok = all(enviar_whatsapp(n, f"🎓 *{assunto}*\n\n{corpo}") for n in numeros)
-    return ok
+    numeros = [n.strip() for n in _secrets_get("TESOUREIRAS_WA").split(",") if n.strip()]
+    if not numeros:
+        return False
+    return all(enviar_whatsapp(n, f"🎓 *{assunto}*\\n\\n{corpo}") for n in numeros)
 
-# ═════════════════════════════════════════════════════════════
-# PDF
-# ═════════════════════════════════════════════════════════════
 
-def gerar_pdf(ym: str, periodos, alunos, trans) -> bytes:
+# ─── PDF ────────────────────────────────────────────────────────────────────
+def gerar_pdf(ym, periodos, alunos, trans_rows) -> bytes:
     hoje = datetime.date.today().strftime("%d/%m/%Y")
+    trans = F.carregar_transacoes_agrupadas(trans_rows)
     rows_ativos, rows_desist = [], []
     total_mensalidades = 0.0
     n_em_dia = n_dev = 0
 
     for a in alunos:
-        calc = calcular_aluno(a, periodos, trans, ym)
+        calc = F.calcular_aluno(a, periodos, trans, ym)
         if a["status"] == "Inativo":
-            rows_desist.append([
-                a["id"], a["nome"], f"Turma {a['turma']}",
-                fmt_brl(calc["total_pago"]),
-                fmt_brl(calc["devolucao"]),
-                fmt_brl(calc["dev_pendente"]),
-            ])
+            rows_desist.append([a["id"], a["nome"], f"Turma {a['turma']}",
+                                F.fmt_brl(calc["total_pago"]),
+                                F.fmt_brl(calc["devolucao"]),
+                                F.fmt_brl(calc["dev_pendente"])])
             continue
         total_mensalidades += calc["total_pago"]
         if calc["saldo"] >= 0:
             n_em_dia += 1
             rows_ativos.append([a["id"], a["nome"], f"Turma {a['turma']}",
-                                 fmt_brl(calc["total_pago"]), "Em dia"])
+                                F.fmt_brl(calc["total_pago"]), "Em dia"])
         else:
             n_dev += 1
             rows_ativos.append([a["id"], a["nome"], f"Turma {a['turma']}",
-                                 fmt_brl(abs(calc["saldo"])), "DEVEDOR"])
+                                F.fmt_brl(abs(calc["saldo"])), "DEVEDOR"])
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
         rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     styles = getSampleStyleSheet()
-    H1  = ParagraphStyle("H1",  parent=styles["Heading1"], fontSize=16,
-            textColor=colors.HexColor("#1b4332"), spaceAfter=4)
-    H2  = ParagraphStyle("H2",  parent=styles["Heading2"], fontSize=12,
-            textColor=colors.HexColor("#2d6a4f"), spaceBefore=14, spaceAfter=6)
+    H1 = ParagraphStyle("H1", parent=styles["Heading1"], fontSize=16,
+        textColor=colors.HexColor("#1b4332"), spaceAfter=4)
+    H2 = ParagraphStyle("H2", parent=styles["Heading2"], fontSize=12,
+        textColor=colors.HexColor("#2d6a4f"), spaceBefore=14, spaceAfter=6)
     SUB = ParagraphStyle("SUB", parent=styles["Normal"], fontSize=9,
-            textColor=colors.gray, spaceAfter=8)
+        textColor=colors.gray, spaceAfter=8)
 
     ts_base = TableStyle([
-        ("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#f9fafb")),
-        ("GRID",(0,0),(-1,-1),.5,colors.HexColor("#e2e0d8")),
-        ("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),
-        ("ALIGN",(1,0),(1,-1),"RIGHT"),
-        ("FONTSIZE",(0,0),(-1,-1),10),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f9fafb")),
+        ("GRID", (0, 0), (-1, -1), .5, colors.HexColor("#e2e0d8")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
     ])
     ts_al = TableStyle([
-        ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1b4332")),
-        ("TEXTCOLOR",(0,0),(-1,0),colors.white),
-        ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
-        ("FONTSIZE",(0,0),(-1,-1),9),
-        ("GRID",(0,0),(-1,-1),.5,colors.HexColor("#e2e0d8")),
-        ("ALIGN",(3,1),(3,-1),"RIGHT"),
-        ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#f9fafb")]),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1b4332")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), .5, colors.HexColor("#e2e0d8")),
+        ("ALIGN", (3, 1), (3, -1), "RIGHT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fafb")]),
     ])
     for i, r in enumerate(rows_ativos):
         if r[4] == "DEVEDOR":
-            ts_al.add("TEXTCOLOR",(3,i+1),(4,i+1),colors.HexColor("#b91c1c"))
-            ts_al.add("FONTNAME",(3,i+1),(4,i+1),"Helvetica-Bold")
+            ts_al.add("TEXTCOLOR", (3, i + 1), (4, i + 1), colors.HexColor("#b91c1c"))
+            ts_al.add("FONTNAME", (3, i + 1), (4, i + 1), "Helvetica-Bold")
 
     elems = [
-        Paragraph(f"🎓 Formatura Oshiman 2028 — Fechamento {fmt_mes(ym)}", H1),
-        Paragraph(f"Emitido em {hoje}  |  Referência: {fmt_mes(ym)}", SUB),
-        HRFlowable(width="100%",thickness=1,color=colors.HexColor("#e2e0d8"),spaceAfter=10),
+        Paragraph(f"🎓 {CFG['nome_comissao']} — Fechamento {F.fmt_mes(ym)}", H1),
+        Paragraph(f"Emitido em {hoje}  |  Referência: {F.fmt_mes(ym)}", SUB),
+        HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e2e0d8"), spaceAfter=10),
         Paragraph("Resumo financeiro", H2),
         Table([
-            ["Total de mensalidades arrecadadas", fmt_brl(total_mensalidades)],
-            ["Alunos em dia",                     str(n_em_dia)],
-            ["Alunos devedores",                  str(n_dev)],
-        ], colWidths=[300,160], style=ts_base),
-        Spacer(1,12),
-        Paragraph("Situação por aluno", H2),
-        Table([["ID","Nome","Turma","Valor","Situação"]] + rows_ativos,
-              colWidths=[30,210,60,90,70], style=ts_al),
-    ]
+        ["Total de mensalidades arrecadadas", F.fmt_brl(total_mensalidades)],
+        ["Alunos em dia", str(n_em_dia)],
+        ["Alunos devedores", str(n_dev)],
+    ], colWidths=[300, 160], style=ts_base)]
+    elems.append(Spacer(1, 12))
+    elems.append(Paragraph("Situação por aluno", H2))
+    elems.append(Table([["ID", "Nome", "Turma", "Valor", "Situação"]] + rows_ativos,
+                  colWidths=[30, 210, 60, 90, 70], style=ts_al))
+
     if rows_desist:
         ts_d = TableStyle([
-            ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#5a5850")),
-            ("TEXTCOLOR",(0,0),(-1,0),colors.white),
-            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
-            ("FONTSIZE",(0,0),(-1,-1),9),
-            ("GRID",(0,0),(-1,-1),.5,colors.HexColor("#e2e0d8")),
-            ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#f9fafb")]),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#5a5850")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("GRID", (0, 0), (-1, -1), .5, colors.HexColor("#e2e0d8")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fafb")]),
         ])
         elems += [
-            Spacer(1,12),
+            Spacer(1, 12),
             Paragraph("Desistentes — histórico de devoluções", H2),
-            Table(
-                [["ID","Aluno","Turma","Total pago","Devolvido","Pendente"]] + rows_desist,
-                colWidths=[30,180,55,85,85,75], style=ts_d
-            ),
+            Table([["ID", "Aluno", "Turma", "Total pago", "Devolvido", "Pendente"]] + rows_desist,
+                  colWidths=[30, 180, 55, 85, 85, 75], style=ts_d),
         ]
     doc.build(elems)
     buf.seek(0)
     return buf.getvalue()
 
-# ═════════════════════════════════════════════════════════════
-# MATCHING / IMPORTAÇÃO
-# ═════════════════════════════════════════════════════════════
 
-def match_aluno(descricao: str, alunos_ativos: list):
-    up = descricao.upper()
-    for a in alunos_ativos:
-        if a["termos_pix"]:
-            for t in [x.strip().upper() for x in a["termos_pix"].split(",")]:
-                if t and t in up:
-                    return a["id"], a["nome"]
-    return None, None
-
-def detecta_categoria(descricao: str, valor: float, tem_aluno: bool) -> str:
-    up = descricao.upper()
-    if any(k in up for k in ["APLIC","PRIVILEGE","INVEST"]):
-        return "RESGATE" if valor > 0 else "INVESTIMENTO"
-    if "RESGATE" in up:
-        return "RESGATE"
-    if any(k in up for k in ["REND","APLIC AUT"]):
-        return "RENDIMENTO"
-    if tem_aluno:
-        return "MENSALIDADE" if valor > 0 else "DEVOLUCAO"
-    return "SAIDA" if valor < 0 else "OUTRO"
-
+# ─── IMPORT / MATCHING ──────────────────────────────────────────────────────
 def parse_csv(texto: str, alunos_ativos: list) -> list:
     linhas = []
     sep = ";" if texto.count(";") > texto.count(",") else ","
     for parts in csv.reader(io.StringIO(texto), delimiter=sep):
-        parts = [p.strip().strip('"\'') for p in parts]
+        parts = [p.strip().strip("\"'") for p in parts]
         if len(parts) < 3:
             continue
         dm = re.match(r"(\d{2})/(\d{2})/(\d{4})", parts[0])
@@ -454,71 +372,68 @@ def parse_csv(texto: str, alunos_ativos: list) -> list:
         data = f"{dm.group(3)}-{dm.group(2)}-{dm.group(1)}"
         try:
             valor = float(parts[2].replace(".", "").replace(",", "."))
-        except:
+        except Exception:
             continue
         desc = parts[1]
-        dup = db().table("transacoes").select("id") \
-            .eq("data", data).eq("descricao", desc).execute().data
-        if dup:
+        if db().table("transacoes").select("id").eq("data", data) \
+                .eq("descricao", desc).execute().data:
             continue
-        aluno_id, aluno_nome = match_aluno(desc, alunos_ativos)
-        categoria = detecta_categoria(desc, valor, bool(aluno_id))
+        aluno_id, aluno_nome = F.match_aluno(desc, alunos_ativos)
+        categoria = F.detecta_categoria(desc, valor, bool(aluno_id))
         linhas.append({"data": data, "descricao": desc, "valor": valor,
-                        "aluno_id": aluno_id, "aluno_nome": aluno_nome,
-                        "categoria": categoria})
+                       "aluno_id": aluno_id, "aluno_nome": aluno_nome,
+                       "categoria": categoria})
     return linhas
 
-# ═════════════════════════════════════════════════════════════
-# LOGIN
-# ═════════════════════════════════════════════════════════════
 
+# ─── LOGIN ──────────────────────────────────────────────────────────────────
 def tela_login():
-    st.markdown("""
+    st.markdown(f"""
     <div style="text-align:center;padding:48px 0 24px">
       <div style="font-size:52px">🎓</div>
-      <h2 style="margin:8px 0 4px;color:#1b4332">Formatura Oshiman 2028</h2>
+      <h2 style="margin:8px 0 4px;color:#1b4332">{CFG['nome_comissao']}</h2>
       <p style="color:#8a877e;font-size:14px">Gestão Financeira da Comissão</p>
     </div>
     """, unsafe_allow_html=True)
-    perfil = st.selectbox("Perfil de acesso", ["Tesouraria","Consulta"])
-    senha  = st.text_input("Senha", type="password")
+    perfil = st.selectbox("Perfil de acesso", ["Tesouraria", "Consulta"])
+    senha = st.text_input("Senha", type="password")
     if st.button("Entrar", type="primary"):
         chave = "SENHA_TESOURARIA" if perfil == "Tesouraria" else "SENHA_CONSULTA"
-        if senha == st.secrets.get(chave, ""):
+        if senha == _secrets_get(chave):
             st.session_state["perfil"] = perfil
             st.rerun()
         else:
             st.error("Senha incorreta")
 
-# ═════════════════════════════════════════════════════════════
-# MAIN
-# ═════════════════════════════════════════════════════════════
 
+# ─── MAIN ───────────────────────────────────────────────────────────────────
 if "perfil" not in st.session_state:
     tela_login()
     st.stop()
 
-perfil   = st.session_state["perfil"]
+perfil = st.session_state["perfil"]
 is_admin = perfil == "Tesouraria"
 
-# Garante draft do mês anterior sempre que o app abre
+if _demo_ativo():
+    st.caption("⚙️ *Modo demonstração* (sem Supabase configurado). Os dados são fictícios.")
+
 garantir_draft_mes_anterior()
 
 st.markdown(f"""
 <div class="top-nav">
-  <h3>🎓 Oshiman 2028</h3>
+  <h3>🎓 {CFG['nome_curto']}</h3>
   <span>{'🔑 Tesouraria' if is_admin else '👁 Consulta'}</span>
 </div>
 """, unsafe_allow_html=True)
 
 # Banner de draft pendente (para admin)
 if is_admin:
-    mes_anterior = prev_ym(current_ym())
+    mes_anterior = F.prev_ym(F.current_ym())
     fech = get_fechamento(mes_anterior)
     if fech and fech["status"] == "draft":
         st.markdown(f"""
         <div class="draft-box">
-          <h4>⚠️ Fechamento de {fmt_mes(mes_anterior)} aguarda confirmação</h4>
+          <h4>⚠️ Fechamento de {F.fmt_mes(mes_anterior)} aguarda confirmação</h4>
           <p>Revise a situação dos alunos e confirme o fechamento na aba 📄 Fechamento.</p>
         </div>
         """, unsafe_allow_html=True)
@@ -527,19 +442,78 @@ if st.button("Sair", type="secondary"):
     del st.session_state["perfil"]
     st.rerun()
 
-tabs = st.tabs(["📋 Mês corrente", "📊 Situação fechada", "📥 Extrato",
-                "📄 Fechamento", "⚙️ Cadastros"])
+tabs = st.tabs(["📊 Visão geral", "📋 Mês corrente", "📊 Situação fechada",
+                "📥 Extrato", "📄 Fechamento", "⚙️ Cadastros"])
 
-# ════════════════════════════════════════════════════════════
-# ABA 0 — MÊS CORRENTE (prévia — quem já pagou este mês)
-# ════════════════════════════════════════════════════════════
+# Dados carregados uma vez por execução (evita recarregar a cada aba)
+periodos = get_periodos()
+alunos = get_alunos()
+
+
+# ─── ABA 0 — VISÃO GERAL (painel de caixa) ─────────────────────────────────
 with tabs[0]:
-    hoje_ym  = current_ym()
-    alunos   = db().table("alunos").select("*").order("turma").order("id").execute().data
-    ativos   = [a for a in alunos if a["status"] == "Ativo"]
+    ate_ym = get_ultimo_mes_fechado() or F.current_ym()
+    trans_rows = get_transacoes()
+    p = F.calcular_painel(trans_rows, periodos, alunos, ate_ym)
 
-    st.markdown(f'<div class="sec-title">Prévia — {fmt_mes(hoje_ym)}</div>',
+    st.markdown(f'<div class="sec-title">Caixa consolidado</div>', unsafe_allow_html=True)
+    cards(
+        ("Saldo total", F.fmt_brl(p["patrimonio"]), "green"),
+        ("Mensalidades arrecadadas", F.fmt_brl(p["total_mensalidades"]), "blue"),
+        ("Inadimplência", F.fmt_brl(p["inadimplencia"]), "red" if p["inadimplencia"] else "green"),
+        ("Rendimento acumulado", F.fmt_brl(p["rendimento"]), "orange"),
+    )
+    st.markdown(
+        f'<div class="info-box">Situação de caixa até <b>{F.fmt_mes(ate_ym)}</b>. '
+        f'O "saldo total" considera conta corrente + investimento.</div>',
         unsafe_allow_html=True)
+
+    # Saldo conta vs investimento
+    st.markdown('<div class="sec-title">Conta corrente × Investimento</div>',
+                unsafe_allow_html=True)
+    cards(
+        ("Em conta corrente", F.fmt_brl(p["saldo_conta"]), "blue"),
+        ("Aplicado no investimento", F.fmt_brl(p["saldo_invest"]), "orange"),
+        ("Total de aportes", F.fmt_brl(p["aportes"]), "blue"),
+        ("Resgates", F.fmt_brl(p["resgates"]), "green"),
+    )
+
+    # Arrecadação por ano (meta x atingido)
+    st.markdown('<div class="sec-title">Arrecadação por ano</div>', unsafe_allow_html=True)
+    rows = []
+    for ano, pago in p["arrecadacao_por_ano"].items():
+        meta = p["meta_ano"].get(ano, 0.0)
+        pct = (pago / meta * 100) if meta else 0.0
+        cls = "green" if pct >= 100 else ("orange" if pct >= 70 else "red")
+        rows.append([
+            ano, F.fmt_brl(pago), F.fmt_brl(meta),
+            f'<span class="badge badge-{"green" if cls=="green" else "warn" if cls=="orange" else "red"}">{pct:.0f}%</span>'
+        ])
+    st.markdown(render_table(
+        ["Ano", "Pago", "Meta", "Atingido"], rows,
+        right_align=(1, 2)), unsafe_allow_html=True)
+
+    # Orçamento/previsão (se houver tabela)
+    itens = get_orcamento()
+    if itens:
+        st.markdown('<div class="sec-title">Previsão de orçamento</div>', unsafe_allow_html=True)
+        rows = [[i["descricao"], i["data"], F.fmt_brl(i["valor"])] for i in itens]
+        rows.append(["<b>Total</b>", "", f"<b>{F.fmt_brl(F.total_orcamento(itens))}</b>"])
+        st.markdown(render_table(["Item", "Quando", "Valor"], rows,
+                                 right_align=(2,)), unsafe_allow_html=True)
+
+    st.caption("Fórmulas: total arrecadado = soma das mensalidades; "
+               "saldo conta = soma do extrato; investimento = aportes − resgates. "
+               "Confira com o extrato — as contas vivem centralizadas em `financeiro.py`.")
+
+
+# ─── ABA 1 — MÊS CORRENTE (prévia) ─────────────────────────────────────────
+with tabs[1]:
+    hoje_ym = F.current_ym()
+    ativos = [a for a in alunos if a["status"] == "Ativo"]
+
+    st.markdown(f'<div class="sec-title">Prévia — {F.fmt_mes(hoje_ym)}</div>',
+                unsafe_allow_html=True)
     st.markdown("""
     <div class="info-box">
     Esta é uma <b>prévia</b>. Os pais têm o mês inteiro para pagar.
@@ -547,46 +521,31 @@ with tabs[0]:
     </div>
     """, unsafe_allow_html=True)
 
-    pagaram, nao_pagaram = [], []
-    for a in ativos:
-        if pagou_mes_corrente(a["id"], hoje_ym):
-            pagaram.append(a)
-        else:
-            nao_pagaram.append(a)
+    pagantes = quem_pagou_no_mes(hoje_ym)  # uma query, não uma por aluno
+    pagaram = [a for a in ativos if a["id"] in pagantes]
+    nao_pagaram = [a for a in ativos if a["id"] not in pagantes]
 
-    st.markdown(f"""
-    <div class="stat-row">
-      <div class="stat-card">
-        <div class="lbl">Já pagaram</div>
-        <div class="val green">{len(pagaram)}</div>
-      </div>
-      <div class="stat-card">
-        <div class="lbl">Ainda não pagaram</div>
-        <div class="val orange">{len(nao_pagaram)}</div>
-      </div>
-      <div class="stat-card">
-        <div class="lbl">Total ativos</div>
-        <div class="val">{len(ativos)}</div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    cards(
+        ("Já pagaram", str(len(pagaram)), "green"),
+        ("Ainda não pagaram", str(len(nao_pagaram)), "orange"),
+        ("Total ativos", str(len(ativos)), "blue"),
+    )
 
     if nao_pagaram:
         st.markdown("**Ainda não pagaram este mês:**")
         for a in nao_pagaram:
-            cel  = re.sub(r"\D", "", a["celular"] or "")
-            msg  = (f"Olá! Passando para lembrar da mensalidade de {fmt_mes(hoje_ym)} "
-                    f"da Formatura Oshiman. 🎓")
-            link = f"https://wa.me/55{cel}?text={urllib.parse.quote(msg)}"
+            msg = (f"Olá! Passando para lembrar da mensalidade de {F.fmt_mes(hoje_ym)} "
+                   f"da Formatura. 🎓")
             st.markdown(f"""
             <div class="aluno-card">
               <div class="aluno-nome">{a['nome']}</div>
               <div class="aluno-sub">ID {a['id']} · Turma {a['turma']}</div>
-              <span class="badge badge-warn">Não pagou {fmt_mes(hoje_ym)}</span>
+              <span class="badge badge-warn">Não pagou {F.fmt_mes(hoje_ym)}</span>
             </div>
             """, unsafe_allow_html=True)
-            if is_admin:
-                st.link_button(f"📲 Lembrete WhatsApp — {a['nome'].split()[0]}", link)
+            if is_admin and a.get("celular"):
+                st.link_button(f"📲 Lembrete WhatsApp — {a['nome'].split()[0]}",
+                               wa_link(a["celular"], msg))
 
     if pagaram:
         st.markdown("**Já pagaram:**")
@@ -595,35 +554,32 @@ with tabs[0]:
             <div class="aluno-card">
               <div class="aluno-nome">{a['nome']}</div>
               <div class="aluno-sub">ID {a['id']} · Turma {a['turma']}</div>
-              <span class="badge badge-green">✓ Pago em {fmt_mes(hoje_ym)}</span>
+              <span class="badge badge-green">✓ Pago em {F.fmt_mes(hoje_ym)}</span>
             </div>
             """, unsafe_allow_html=True)
 
-# ════════════════════════════════════════════════════════════
-# ABA 1 — SITUAÇÃO FECHADA (baseada no último mês confirmado)
-# ════════════════════════════════════════════════════════════
-with tabs[1]:
+
+# ─── ABA 2 — SITUAÇÃO FECHADA ──────────────────────────────────────────────
+with tabs[2]:
     ultimo_fechado = get_ultimo_mes_fechado()
-    periodos = get_periodos()
-    alunos   = db().table("alunos").select("*").order("turma").order("id").execute().data
-    trans    = carregar_transacoes_agrupadas()
+    trans_rows = get_transacoes()
+    trans = F.carregar_transacoes_agrupadas(trans_rows)
 
     if not ultimo_fechado:
         st.markdown('<div class="warn-box">Nenhum mês fechado ainda. '
-            'Confirme um fechamento na aba 📄 Fechamento.</div>', unsafe_allow_html=True)
+                    'Confirme um fechamento na aba 📄 Fechamento.</div>', unsafe_allow_html=True)
     else:
-        st.markdown(f'<div class="sec-title">Situação — até {fmt_mes(ultimo_fechado)}</div>',
-            unsafe_allow_html=True)
+        st.markdown(f'<div class="sec-title">Situação — até {F.fmt_mes(ultimo_fechado)}</div>',
+                    unsafe_allow_html=True)
 
-        ativos   = [a for a in alunos if a["status"] == "Ativo"]
+        ativos = [a for a in alunos if a["status"] == "Ativo"]
         inativos = [a for a in alunos if a["status"] == "Inativo"]
 
         total_mensalidades = total_debito = 0.0
         n_em_dia = n_dev = 0
         items = []
-
         for a in ativos:
-            calc = calcular_aluno(a, periodos, trans, ultimo_fechado)
+            calc = F.calcular_aluno(a, periodos, trans, ultimo_fechado)
             total_mensalidades += calc["total_pago"]
             if calc["saldo"] >= 0:
                 n_em_dia += 1
@@ -632,45 +588,30 @@ with tabs[1]:
                 total_debito += abs(calc["saldo"])
             items.append((a, calc))
 
-        st.markdown(f"""
-        <div class="stat-row">
-          <div class="stat-card">
-            <div class="lbl">Mensalidades</div>
-            <div class="val green">{fmt_brl(total_mensalidades)}</div>
-          </div>
-          <div class="stat-card">
-            <div class="lbl">Em débito</div>
-            <div class="val red">{fmt_brl(total_debito)}</div>
-          </div>
-          <div class="stat-card">
-            <div class="lbl">Em dia</div>
-            <div class="val">{n_em_dia}</div>
-          </div>
-          <div class="stat-card">
-            <div class="lbl">Devedores</div>
-            <div class="val red">{n_dev}</div>
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
+        cards(
+            ("Mensalidades", F.fmt_brl(total_mensalidades), "green"),
+            ("Em débito", F.fmt_brl(total_debito), "red"),
+            ("Em dia", str(n_em_dia), "blue"),
+            ("Devedores", str(n_dev), "red" if n_dev else "green"),
+        )
 
-        filtro = st.selectbox("Filtrar", ["Todos","Só devedores","Só em dia"],
+        filtro = st.selectbox("Filtrar", ["Todos", "Só devedores", "Só em dia"],
             label_visibility="collapsed")
 
-        # Alunos ativos
         for a, calc in items:
-            saldo  = calc["saldo"]
-            adiant = calc["adiantados"]
-            if filtro == "Só devedores" and saldo >= 0: continue
-            if filtro == "Só em dia"   and saldo <  0: continue
-
-            detalhe = f"Pago: {fmt_brl(calc['total_pago'])} | Meta: {fmt_brl(calc['meta'])}"
+            saldo = calc["saldo"]
+            if filtro == "Só devedores" and saldo >= 0:
+                continue
+            if filtro == "Só em dia" and saldo < 0:
+                continue
+            detalhe = f"Pago: {F.fmt_brl(calc['total_pago'])} | Meta: {F.fmt_brl(calc['meta'])}"
             if saldo >= 0:
                 adiant_str = (f' <span class="badge badge-warn">'
-                    f'{adiant} {"mês" if adiant==1 else "meses"} adiant.</span>'
-                    if adiant > 0 else "")
+                              f'{calc["adiantados"]} {"mês" if calc["adiantados"]==1 else "meses"} adiant.</span>'
+                              if calc["adiantados"] > 0 else "")
                 badge = f'<span class="badge badge-green">Em dia</span>{adiant_str}'
             else:
-                badge = f'<span class="badge badge-red">Deve {fmt_brl(abs(saldo))}</span>'
+                badge = f'<span class="badge badge-red">Deve {F.fmt_brl(abs(saldo))}</span>'
 
             st.markdown(f"""
             <div class="aluno-card">
@@ -680,26 +621,21 @@ with tabs[1]:
             </div>
             """, unsafe_allow_html=True)
 
-            if saldo < 0 and is_admin:
-                cel  = re.sub(r"\D", "", a["celular"] or "")
-                msg  = (f"Olá! Consta um débito de {fmt_brl(abs(saldo))} referente "
-                        f"às mensalidades da Formatura Oshiman. "
-                        f"Podemos confirmar o pagamento? 🎓")
-                link = f"https://wa.me/55{cel}?text={urllib.parse.quote(msg)}"
-                st.link_button(f"📲 Cobrar {fmt_brl(abs(saldo))} — {a['nome'].split()[0]}", link)
+            if saldo < 0 and is_admin and a.get("celular"):
+                msg = (f"Olá! Consta um débito de {F.fmt_brl(abs(saldo))} referente "
+                       f"às mensalidades da Formatura. Podemos confirmar o pagamento? 🎓")
+                st.link_button(f"📲 Cobrar {F.fmt_brl(abs(saldo))} — {a['nome'].split()[0]}",
+                               wa_link(a["celular"], msg))
 
-        # Desistentes — sempre visíveis, em cinza, no final
         if inativos and filtro == "Todos":
             st.markdown('<div class="sec-title">Desistentes</div>', unsafe_allow_html=True)
             for a in inativos:
-                calc = calcular_aluno(a, periodos, trans, ultimo_fechado)
-                dev_badge = (
-                    f'<span class="badge badge-warn">Devolução pendente {fmt_brl(calc["dev_pendente"])}</span>'
-                    if calc["dev_pendente"] > 0.01
-                    else '<span class="badge badge-gray">Devolução concluída</span>'
-                )
-                detalhe = (f"Total pago: {fmt_brl(calc['total_pago'])} | "
-                           f"Devolvido: {fmt_brl(calc['devolucao'])}")
+                calc = F.calcular_aluno(a, periodos, trans, ultimo_fechado)
+                dev_badge = (f'<span class="badge badge-warn">Devolução pendente {F.fmt_brl(calc["dev_pendente"])}</span>'
+                             if calc["dev_pendente"] > 0.01
+                             else '<span class="badge badge-gray">Devolução concluída</span>')
+                detalhe = (f"Total pago: {F.fmt_brl(calc['total_pago'])} | "
+                           f"Devolvido: {F.fmt_brl(calc['devolucao'])}")
                 st.markdown(f"""
                 <div class="aluno-card-inativo">
                   <div class="aluno-nome-inativo">⏹ {a['nome']}</div>
@@ -708,165 +644,214 @@ with tabs[1]:
                 </div>
                 """, unsafe_allow_html=True)
 
-# ════════════════════════════════════════════════════════════
-# ABA 2 — EXTRATO / IMPORTAÇÃO
-# ════════════════════════════════════════════════════════════
-with tabs[2]:
+
+# ─── ABA 3 — EXTRATO / IMPORTAÇÃO ──────────────────────────────────────────
+with tabs[3]:
     if not is_admin:
         st.markdown('<div class="info-box">🔒 Disponível apenas para Tesouraria.</div>',
-            unsafe_allow_html=True)
+                    unsafe_allow_html=True)
         st.stop()
 
-    st.markdown('<div class="sec-title">Importar extrato (CSV)</div>', unsafe_allow_html=True)
-    st.markdown("""
-    <div class="info-box">
-    Cole o extrato do banco. Formato: <b>DD/MM/AAAA, Descrição, Valor</b>
-    (vírgula ou ponto-e-vírgula). Valores negativos = saídas.
-    A primeira linha pode ser cabeçalho.
-    </div>
-    """, unsafe_allow_html=True)
+    sub_import, sub_hist, sub_editar = st.tabs(["Importar CSV", "Histórico", "Corrigir transação"])
 
-    csv_texto = st.text_area("Extrato (CSV)", height=160,
-        placeholder="14/04/2025,PIX TRANSF MARGARE14/04,200.00\n15/04/2025,INT APLICACAO PRIVILEGE,-3000.00")
+    with sub_import:
+        st.markdown("""
+        <div class="info-box">
+        Cole o extrato do banco. Formato: <b>DD/MM/AAAA, Descrição, Valor</b>
+        (vírgula ou ponto-e-vírgula). Valores negativos = saídas.
+        A primeira linha pode ser cabeçalho.
+        </div>
+        """, unsafe_allow_html=True)
 
-    if st.button("🔍 Analisar extrato", type="primary"):
-        if not csv_texto.strip():
-            st.warning("Cole o extrato antes de analisar.")
-        else:
-            with st.spinner("Analisando..."):
-                alunos_ativos = db().table("alunos").select("id,nome,termos_pix") \
-                    .eq("status","Ativo").execute().data
-                linhas = parse_csv(csv_texto, alunos_ativos)
-            if not linhas:
-                st.info("Nenhuma linha nova encontrada (já importadas ou formato inválido).")
+        csv_texto = st.text_area("Extrato (CSV)", height=160,
+            placeholder="14/04/2025,PIX TRANSF MARGARE14/04,200.00\n15/04/2025,INT APLICACAO PRIVILEGE,-3000.00")
+
+        if st.button("🔍 Analisar extrato", type="primary"):
+            if not csv_texto.strip():
+                st.warning("Cole o extrato antes de analisar.")
             else:
-                st.session_state["pending"] = linhas
+                with st.spinner("Analisando..."):
+                    alunos_ativos = db().table("alunos").select("id,nome,termos_pix") \
+                        .eq("status", "Ativo").execute().data
+                    linhas = parse_csv(csv_texto, alunos_ativos)
+                if not linhas:
+                    st.info("Nenhuma linha nova encontrada (já importadas ou formato inválido).")
+                else:
+                    st.session_state["pending"] = linhas
+                    st.rerun()
+
+        if "pending" in st.session_state:
+            linhas = st.session_state["pending"]
+            nao_id = [l for l in linhas if not l["aluno_id"] and l["categoria"] in ("OUTRO", "SAIDA")]
+
+            st.success(f"**{len(linhas)}** linha(s) novas. " +
+                (f"**{len(nao_id)}** precisam de identificação manual."
+                 if nao_id else "Todas identificadas ✓"))
+
+            if nao_id:
+                alunos_opts = db().table("alunos").select("id,nome").eq("status", "Ativo").execute().data
+                opts_map = {a["nome"]: a["id"] for a in alunos_opts}
+                st.markdown('<div class="sec-title">Identificar manualmente</div>',
+                            unsafe_allow_html=True)
+                for l in nao_id:
+                    gi = linhas.index(l)
+                    st.markdown(f"**{l['data']}** · {l['descricao']} · `{F.fmt_brl(l['valor'])}`")
+                    opcoes = ["— não identificado —", "Investimento/Saída", "Devolução s/ aluno"] + list(opts_map.keys())
+                    escolha = st.selectbox("Atribuir a:", opcoes, key=f"attr_{gi}")
+                    if escolha == "Investimento/Saída":
+                        linhas[gi].update({"categoria": "INVESTIMENTO" if l["valor"] < 0 else "RESGATE",
+                                           "aluno_id": None})
+                    elif escolha == "Devolução s/ aluno":
+                        linhas[gi].update({"categoria": "DEVOLUCAO", "aluno_id": None})
+                    elif escolha in opts_map:
+                        linhas[gi].update({
+                            "aluno_id": opts_map[escolha], "aluno_nome": escolha,
+                            "categoria": "MENSALIDADE" if l["valor"] > 0 else "DEVOLUCAO"})
+
+            st.markdown('<div class="sec-title">Prévia</div>', unsafe_allow_html=True)
+            st.dataframe(pd.DataFrame([{
+                "Data": l["data"], "Descrição": l["descricao"][:42],
+                "Valor": F.fmt_brl(l["valor"]), "Aluno": l["aluno_nome"] or "—",
+                "Categoria": l["categoria"]
+            } for l in linhas]), width="stretch", hide_index=True)
+
+            c1, c2 = st.columns(2)
+            if c1.button("✓ Confirmar importação", type="primary"):
+                with st.spinner("Salvando..."):
+                    db().table("transacoes").insert([{
+                        "data": l["data"], "descricao": l["descricao"],
+                        "valor": l["valor"], "categoria": l["categoria"],
+                        "aluno_id": l["aluno_id"], "observacao": ""
+                    } for l in linhas]).execute()
+                del st.session_state["pending"]
+                st.success(f"✓ {len(linhas)} transações salvas!")
+                st.rerun()
+            if c2.button("Cancelar"):
+                del st.session_state["pending"]
                 st.rerun()
 
-    if "pending" in st.session_state:
-        linhas = st.session_state["pending"]
-        nao_id = [l for l in linhas
-                  if not l["aluno_id"] and l["categoria"] in ("OUTRO","SAIDA")]
-
-        st.success(f"**{len(linhas)}** linha(s) novas. " +
-            (f"**{len(nao_id)}** precisam de identificação manual."
-             if nao_id else "Todas identificadas ✓"))
-
-        if nao_id:
-            alunos_opts = db().table("alunos").select("id,nome") \
-                .eq("status","Ativo").execute().data
-            opts_map = {a["nome"]: a["id"] for a in alunos_opts}
-            st.markdown('<div class="sec-title">Identificar manualmente</div>',
-                unsafe_allow_html=True)
-            for l in nao_id:
-                gi = linhas.index(l)
-                st.markdown(f"**{l['data']}** · {l['descricao']} · `{fmt_brl(l['valor'])}`")
-                opcoes = (["— não identificado —","Investimento/Saída","Devolução s/ aluno"]
-                          + list(opts_map.keys()))
-                escolha = st.selectbox("Atribuir a:", opcoes, key=f"attr_{gi}")
-                if escolha == "Investimento/Saída":
-                    linhas[gi].update({"categoria": "INVESTIMENTO" if l["valor"] < 0 else "RESGATE",
-                                       "aluno_id": None})
-                elif escolha == "Devolução s/ aluno":
-                    linhas[gi].update({"categoria": "DEVOLUCAO", "aluno_id": None})
-                elif escolha in opts_map:
-                    linhas[gi].update({
-                        "aluno_id": opts_map[escolha], "aluno_nome": escolha,
-                        "categoria": "MENSALIDADE" if l["valor"] > 0 else "DEVOLUCAO"
-                    })
-
-        st.markdown('<div class="sec-title">Prévia</div>', unsafe_allow_html=True)
+    with sub_hist:
+        anos_rows = db().table("transacoes").select("data").execute().data
+        anos = sorted({r["data"][:4] for r in anos_rows}, reverse=True)
+        ano_filt = st.selectbox("Ano", ["Todos"] + anos, label_visibility="collapsed")
+        q = db().table("transacoes").select("data,descricao,valor,categoria,aluno_id") \
+            .order("data", desc=True)
+        if ano_filt != "Todos":
+            q = q.like("data", f"{ano_filt}%")
+        hist = q.execute().data
         st.dataframe(pd.DataFrame([{
-            "Data": l["data"], "Descrição": l["descricao"][:42],
-            "Valor": fmt_brl(l["valor"]),
-            "Aluno": l["aluno_nome"] or "—",
-            "Categoria": l["categoria"]
-        } for l in linhas]), use_container_width=True, hide_index=True)
+            "Data": r["data"], "Descrição": r["descricao"],
+            "Valor": F.fmt_brl(r["valor"]), "Categoria": r["categoria"],
+            "Aluno": r["aluno_id"] or "—"
+        } for r in hist]), width="stretch", hide_index=True)
+        st.caption(f"{len(hist)} transações.")
 
-        c1, c2 = st.columns(2)
-        if c1.button("✓ Confirmar importação", type="primary"):
-            with st.spinner("Salvando..."):
-                db().table("transacoes").insert([{
-                    "data": l["data"], "descricao": l["descricao"],
-                    "valor": l["valor"], "categoria": l["categoria"],
-                    "aluno_id": l["aluno_id"], "observacao": ""
-                } for l in linhas]).execute()
-            del st.session_state["pending"]
-            st.success(f"✓ {len(linhas)} transações salvas!")
-            st.rerun()
-        if c2.button("Cancelar"):
-            del st.session_state["pending"]
-            st.rerun()
+    with sub_editar:
+        st.markdown("""
+        <div class="warn-box">
+        Correção de lançamentos: se uma importação errou o aluno/categoria/valor,
+        escolha a transação abaixo e ajuste ou **exclua**.
+        </div>
+        """, unsafe_allow_html=True)
+        # Alvos mais recentes (últimas 300)
+        alvo = db().table("transacoes").select(
+            "id,data,descricao,valor,categoria,aluno_id")
+        alvo = alvo.order("data", desc=True).limit(300).execute().data
 
-    st.markdown('<div class="sec-title">Histórico de transações</div>', unsafe_allow_html=True)
-    anos_rows = db().table("transacoes").select("data").order("data",desc=True).execute().data
-    anos = sorted({r["data"][:4] for r in anos_rows}, reverse=True)
-    ano_filt = st.selectbox("Ano", ["Todos"] + anos, label_visibility="collapsed")
-    q = db().table("transacoes").select("data,descricao,valor,categoria,aluno_id") \
-        .order("data", desc=True)
-    if ano_filt != "Todos":
-        q = q.like("data", f"{ano_filt}%")
-    st.dataframe(pd.DataFrame([{
-        "Data": r["data"], "Descrição": r["descricao"],
-        "Valor": fmt_brl(r["valor"]),
-        "Categoria": r["categoria"], "Aluno": r["aluno_id"] or "—"
-    } for r in q.execute().data]), use_container_width=True, hide_index=True)
+        if not alvo:
+            st.info("Nenhuma transação cadastrada.")
+        else:
+            nome_map = {a["id"]: a["nome"] for a in alunos}
+            sel_map = {}
+            for t in alvo:
+                nome = nome_map.get(t["aluno_id"], "—")
+                sel_map[f'{t["data"]} · {t["descricao"][:38]} · {F.fmt_brl(t["valor"])} · {t["categoria"]}'] = t
+            chave = st.selectbox("Escolher transação", list(sel_map.keys()))
+            t = sel_map[chave]
 
-# ════════════════════════════════════════════════════════════
-# ABA 3 — FECHAMENTO
-# ════════════════════════════════════════════════════════════
-with tabs[3]:
-    periodos = get_periodos()
-    alunos   = db().table("alunos").select("*").order("turma").order("id").execute().data
-    trans    = carregar_transacoes_agrupadas()
+            c1, c2 = st.columns(2)
+            nova_data = c1.text_input("Data (AAAA-MM-DD)", value=t["data"], key="ed_data")
+            novo_desc = c2.text_input("Descrição", value=t["descricao"], key="ed_desc")
+            novo_valor = st.number_input("Valor (R$)", value=float(t["valor"]),
+                                         step=1.0, key="ed_valor")
+            categorias = ["MENSALIDADE", "DEVOLUCAO", "INVESTIMENTO", "RESGATE",
+                          "RENDIMENTO", "OUTRO", "SAIDA"]
+            nova_cat = st.selectbox("Categoria", categorias,
+                                    index=categorias.index(t["categoria"]) if t["categoria"] in categorias else 0,
+                                    key="ed_cat")
+            opcoes_aluno = ["— sem aluno —"] + [f"{a['id']} · {a['nome']}" for a in alunos]
+            atual = f"{t['aluno_id']} · {nome_map.get(t['aluno_id'])}" if t.get("aluno_id") else "— sem aluno —"
+            novo_aluno = st.selectbox("Aluno",
+                opcoes_aluno, index=opcoes_aluno.index(atual) if atual in opcoes_aluno else 0,
+                key="ed_aluno")
 
-    # Draft pendente
-    mes_anterior = prev_ym(current_ym())
+            c3, c4 = st.columns(2)
+            if c3.button("💾 Salvar alterações", type="primary"):
+                novo_id = None if novo_aluno.startswith("—") else novo_aluno.split(" · ")[0]
+                db().table("transacoes").update({
+                    "data": nova_data, "descricao": novo_desc, "valor": novo_valor,
+                    "categoria": nova_cat, "aluno_id": novo_id
+                }).eq("id", t["id"]).execute()
+                st.success("✓ Transação corrigida!")
+                st.rerun()
+            if c4.button("🗑 Excluir transação"):
+                st.session_state[f"del_{t['id']}"] = True
+            if st.session_state.get(f"del_{t['id']}"):
+                st.warning(f"Excluir **{t['descricao']}** de {t['data']}? Isso não pode ser desfeito.")
+                c5, c6 = st.columns(2)
+                if c5.button("Sim, excluir", type="primary"):
+                    db().table("transacoes").delete().eq("id", t["id"]).execute()
+                    st.success("✓ Transação excluída!")
+                    st.rerun()
+                if c6.button("Cancelar exclusão"):
+                    del st.session_state[f"del_{t['id']}"]
+                    st.rerun()
+
+
+# ─── ABA 4 — FECHAMENTO ────────────────────────────────────────────────────
+with tabs[4]:
+    trans_rows = get_transacoes()
+    trans = F.carregar_transacoes_agrupadas(trans_rows)
+
+    mes_anterior = F.prev_ym(F.current_ym())
     fech = get_fechamento(mes_anterior)
 
     if fech and fech["status"] == "draft":
         st.markdown(f"""
         <div class="draft-box">
-          <h4>📋 Draft — {fmt_mes(mes_anterior)}</h4>
+          <h4>📋 Draft — {F.fmt_mes(mes_anterior)}</h4>
           <p>Criado automaticamente. Revise abaixo e confirme quando estiver pronto.</p>
         </div>
         """, unsafe_allow_html=True)
 
-        # Preview do fechamento
         rows_prev = []
         for a in alunos:
-            calc = calcular_aluno(a, periodos, trans, mes_anterior)
+            calc = F.calcular_aluno(a, periodos, trans, mes_anterior)
             if a["status"] == "Inativo":
-                sit = f"Desistente (dev. pendente: {fmt_brl(calc['dev_pendente'])})" \
+                sit = f"Desistente (dev. pendente: {F.fmt_brl(calc['dev_pendente'])})" \
                     if calc["dev_pendente"] > 0.01 else "Desistente (quitado)"
             elif calc["saldo"] >= 0:
                 sit = "✅ Em dia"
             else:
-                sit = f"🔴 Deve {fmt_brl(abs(calc['saldo']))}"
-            rows_prev.append({
-                "ID": a["id"], "Aluno": a["nome"],
-                "Pago": fmt_brl(calc["total_pago"]),
-                "Meta": fmt_brl(calc["meta"]) if a["status"]=="Ativo" else "—",
-                "Situação": sit
-            })
-        st.dataframe(pd.DataFrame(rows_prev), use_container_width=True, hide_index=True)
+                sit = f"🔴 Deve {F.fmt_brl(abs(calc['saldo']))}"
+            rows_prev.append([
+                a["id"], a["nome"], F.fmt_brl(calc["total_pago"]),
+                F.fmt_brl(calc["meta"]) if a["status"] == "Ativo" else "—", sit,
+            ])
+        st.markdown(render_table(["ID", "Aluno", "Pago", "Meta", "Situação"],
+                                rows_prev, right_align=(2, 3)),
+                    unsafe_allow_html=True)
 
         if is_admin:
-            if st.button(f"✅ Confirmar fechamento de {fmt_mes(mes_anterior)}", type="primary"):
+            if st.button(f"✅ Confirmar fechamento de {F.fmt_mes(mes_anterior)}", type="primary"):
                 with st.spinner("Confirmando e notificando..."):
                     confirmar_fechamento(mes_anterior, perfil)
-                    # Notifica tesoureiras via WhatsApp
-                    devedores = [r for r in rows_prev
-                                 if r["Situação"].startswith("🔴")]
-                    corpo = (
-                        f"Fechamento de {fmt_mes(mes_anterior)} confirmado.\n"
-                        f"Devedores: {len(devedores)}\n"
-                        + ("\n".join(f"• {r['Aluno']}: {r['Situação']}"
-                                     for r in devedores) if devedores
-                           else "✅ Todos em dia!")
-                    )
-                    ok = notificar_tesoureiras(
-                        f"Fechamento {fmt_mes(mes_anterior)}", corpo)
+                    devedores = [r for r in rows_prev if r[4].startswith("🔴")]
+                    corpo = (f"Fechamento de {F.fmt_mes(mes_anterior)} confirmado.\n"
+                             f"Devedores: {len(devedores)}\n"
+                             + ("\n".join(f"• {r[1]}: {r[4]}" for r in devedores) if devedores
+                                else "✅ Todos em dia!"))
+                    ok = notificar_tesoureiras(f"Fechamento {F.fmt_mes(mes_anterior)}", corpo)
                     if ok:
                         st.success("✓ Fechamento confirmado e WhatsApp enviado!")
                     else:
@@ -874,7 +859,6 @@ with tabs[3]:
                         st.warning("WhatsApp não enviado — verifique WA_TOKEN e WA_PHONE_ID nos secrets.")
                 st.rerun()
 
-    # Histórico de fechamentos
     st.markdown('<div class="sec-title">Histórico de fechamentos</div>', unsafe_allow_html=True)
     fechs = db().table("fechamentos").select("*").order("ano_mes", desc=True).execute().data
     if not fechs:
@@ -882,47 +866,44 @@ with tabs[3]:
     else:
         for f in fechs:
             icon = "✅" if f["status"] == "confirmado" else "📋"
-            conf = f["confirmado_em"][:10] if f["confirmado_em"] else "—"
-            by   = f["confirmado_por"] or "—"
-            with st.expander(f"{icon} {fmt_mes(f['ano_mes'])} — {f['status'].upper()}"):
-                st.markdown(f"**Criado em:** {f['criado_em'][:10]}  |  "
+            conf = (f.get("confirmado_em") or "")[:10] or "—"
+            by = f.get("confirmado_por") or "—"
+            criado = (f.get("criado_em") or "")[:10] or "—"
+            with st.expander(f"{icon} {F.fmt_mes(f['ano_mes'])} — {f['status'].upper()}"):
+                st.markdown(f"**Criado em:** {criado}  |  "
                     f"**Confirmado em:** {conf}  |  **Por:** {by}")
-                if f["status"] == "confirmado":
-                    if st.button(f"📥 Baixar PDF {fmt_mes(f['ano_mes'])}",
+                if f["status"] == "confirmado" and is_admin:
+                    if st.button(f"📥 Baixar PDF {F.fmt_mes(f['ano_mes'])}",
                                  key=f"pdf_{f['ano_mes']}"):
                         with st.spinner("Gerando PDF..."):
-                            pdf = gerar_pdf(f["ano_mes"], periodos, alunos, trans)
+                            pdf = gerar_pdf(f["ano_mes"], periodos, alunos, trans_rows)
                         st.download_button(
-                            f"⬇ {fmt_mes(f['ano_mes'])}.pdf", data=pdf,
-                            file_name=f"Fechamento_Oshiman_{f['ano_mes']}.pdf",
-                            mime="application/pdf", key=f"dl_{f['ano_mes']}"
-                        )
+                            f"⬇ {F.fmt_mes(f['ano_mes'])}.pdf", data=pdf,
+                            file_name=f"Fechamento_{F.fmt_mes(f['ano_mes']).replace('/','_')}.pdf",
+                            mime="application/pdf", key=f"dl_{f['ano_mes']}")
 
-# ════════════════════════════════════════════════════════════
-# ABA 4 — CADASTROS
-# ════════════════════════════════════════════════════════════
-with tabs[4]:
+
+# ─── ABA 5 — CADASTROS ──────────────────────────────────────────────────────
+with tabs[5]:
     if not is_admin:
         st.markdown('<div class="info-box">🔒 Disponível apenas para Tesouraria.</div>',
-            unsafe_allow_html=True)
+                    unsafe_allow_html=True)
         st.stop()
 
-    sub1, sub2, sub3 = st.tabs(["Alunos ativos", "Desistentes", "Mensalidades"])
+    sub1, sub2, sub3, sub4 = st.tabs(["Alunos ativos", "Desistentes", "Mensalidades", "Orçamento"])
 
     with sub1:
-        alunos = db().table("alunos").select("*").order("turma").order("id").execute().data
         for a in [x for x in alunos if x["status"] == "Ativo"]:
             with st.expander(f"✅ {a['nome']} ({a['id']})"):
                 c1, c2 = st.columns(2)
-                nome   = c1.text_input("Nome",    value=a["nome"],          key=f"n_{a['id']}")
-                cel    = c2.text_input("Celular", value=a["celular"] or "",  key=f"c_{a['id']}")
+                nome = c1.text_input("Nome", value=a["nome"], key=f"n_{a['id']}")
+                cel = c2.text_input("Celular", value=a["celular"] or "", key=f"c_{a['id']}")
                 termos = st.text_input("Apelidos PIX (vírgula)",
                     value=a["termos_pix"] or "", key=f"p_{a['id']}")
                 c3, c4 = st.columns(2)
                 if c3.button("Salvar", key=f"sv_{a['id']}"):
                     db().table("alunos").update({
-                        "nome": nome, "celular": cel,
-                        "termos_pix": termos.upper()
+                        "nome": nome, "celular": cel, "termos_pix": termos.upper()
                     }).eq("id", a["id"]).execute()
                     st.success("Salvo!"); st.rerun()
                 if c4.button("⚠️ Registrar desistência", key=f"d_{a['id']}"):
@@ -931,8 +912,7 @@ with tabs[4]:
                     data_d = st.date_input("Data da desistência", key=f"dd_{a['id']}")
                     if st.button("Confirmar", key=f"cd_{a['id']}", type="primary"):
                         db().table("alunos").update({
-                            "status": "Inativo",
-                            "data_desistencia": str(data_d)
+                            "status": "Inativo", "data_desistencia": str(data_d)
                         }).eq("id", a["id"]).execute()
                         del st.session_state[f"des_{a['id']}"]
                         st.rerun()
@@ -940,47 +920,46 @@ with tabs[4]:
         st.divider()
         st.markdown("**Adicionar novo aluno**")
         c1, c2, c3 = st.columns(3)
-        n_id    = c1.text_input("ID (ex: 11A)")
-        n_nome  = c2.text_input("Nome completo")
+        n_id = c1.text_input("ID (ex: 11A)")
+        n_nome = c2.text_input("Nome completo")
         n_turma = c3.text_input("Turma (A/B)")
-        n_cel   = st.text_input("Celular WhatsApp")
-        n_pix   = st.text_input("Apelidos PIX (vírgula)")
+        n_cel = st.text_input("Celular WhatsApp")
+        n_pix = st.text_input("Apelidos PIX (vírgula)")
         if st.button("Adicionar aluno", type="primary"):
             if n_id and n_nome:
                 try:
                     db().table("alunos").insert({
                         "id": n_id, "nome": n_nome, "status": "Ativo",
-                        "turma": n_turma, "celular": n_cel,
-                        "termos_pix": n_pix.upper()
+                        "turma": n_turma, "celular": n_cel, "termos_pix": n_pix.upper()
                     }).execute()
                     st.success("Aluno adicionado!"); st.rerun()
                 except Exception as e:
                     st.error(f"Erro: {e}")
 
     with sub2:
-        alunos   = db().table("alunos").select("*").order("data_desistencia",desc=True).execute().data
         inativos = [a for a in alunos if a["status"] == "Inativo"]
-        trans    = carregar_transacoes_agrupadas()
-        periodos = get_periodos()
+        trans_rows2 = get_transacoes()
+        trans2 = F.carregar_transacoes_agrupadas(trans_rows2)
 
         if not inativos:
             st.info("Nenhum desistente registrado.")
         else:
             for a in inativos:
-                calc = calcular_aluno(a, periodos, trans, current_ym())
+                calc = F.calcular_aluno(a, periodos, trans2, F.current_ym())
                 with st.expander(f"⏹ {a['nome']} ({a['id']}) — desistência: {a['data_desistencia'] or '—'}"):
                     c1, c2, c3 = st.columns(3)
-                    c1.metric("Total pago", fmt_brl(calc["total_pago"]))
-                    c2.metric("Devolvido",  fmt_brl(calc["devolucao"]))
-                    c3.metric("Pendente",   fmt_brl(calc["dev_pendente"]))
+                    c1.metric("Total pago", F.fmt_brl(calc["total_pago"]))
+                    c2.metric("Devolvido", F.fmt_brl(calc["devolucao"]))
+                    c3.metric("Pendente", F.fmt_brl(calc["dev_pendente"]))
 
                     trans_aluno = db().table("transacoes").select("data,descricao,valor,categoria") \
                         .eq("aluno_id", a["id"]).order("data").execute().data
                     if trans_aluno:
-                        st.dataframe(pd.DataFrame([{
-                            "Data": t["data"], "Descrição": t["descricao"][:38],
-                            "Valor": fmt_brl(t["valor"]), "Categoria": t["categoria"]
-                        } for t in trans_aluno]), use_container_width=True, hide_index=True)
+                        rows_t = [[t["data"], t["descricao"][:38], F.fmt_brl(t["valor"]), t["categoria"]]
+                                  for t in trans_aluno]
+                        st.markdown(render_table(["Data", "Descrição", "Valor", "Categoria"],
+                                                rows_t, right_align=(2,)),
+                                    unsafe_allow_html=True)
 
                     if st.button("↩️ Reativar", key=f"r_{a['id']}"):
                         db().table("alunos").update({
@@ -989,7 +968,6 @@ with tabs[4]:
                         st.rerun()
 
     with sub3:
-        periodos = get_periodos()
         st.markdown("""
         <div class="info-box">
         Cada período define o valor mensal a partir de uma data (AAAA-MM).
@@ -998,14 +976,41 @@ with tabs[4]:
         """, unsafe_allow_html=True)
         updated = []
         for i, (de, val) in enumerate(periodos):
-            c1, c2 = st.columns([2,2])
-            nd = c1.text_input("A partir de (AAAA-MM)", value=de,        key=f"pd_{i}")
-            nv = c2.number_input("Valor mensal R$",      value=float(val), key=f"pv_{i}", step=10.0)
+            c1, c2 = st.columns([2, 2])
+            nd = c1.text_input("A partir de (AAAA-MM)", value=de, key=f"pd_{i}")
+            nv = c2.number_input("Valor mensal R$", value=float(val), key=f"pv_{i}", step=10.0)
             updated.append((nd, nv))
         if st.button("+ Adicionar período"):
             updated.append(("", 0.0))
         if st.button("Salvar mensalidades", type="primary"):
             db().table("periodos").upsert(
-                [{"de": d, "valor": v} for d, v in updated if d]
-            ).execute()
-            st.success("Salvo!")
+                [{"de": d, "valor": v} for d, v in updated if d]).execute()
+            st.success("Salvo!"); st.rerun()
+
+    with sub4:
+        st.markdown("""
+        <div class="info-box">
+        Previsão de caixa do evento (abertura, mensalidades por ano, encerramento...).
+        O total aparece na aba 📊 Visão geral.
+        </div>
+        """, unsafe_allow_html=True)
+        itens = get_orcamento()
+        for i in itens:
+            c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+            c1.write(i["descricao"])
+            c2.write(i["data"])
+            c3.write(F.fmt_brl(i["valor"]))
+            if c4.button("🗑", key=f"od_{i['id']}"):
+                db().table("orcamento").delete().eq("id", i["id"]).execute()
+                st.rerun()
+        st.divider()
+        st.markdown("**Adicionar item**")
+        c1, c2 = st.columns([3, 1])
+        n_desc = c1.text_input("Descrição", key="or_desc")
+        n_data = c2.text_input("Quando", key="or_data")
+        n_valor = st.number_input("Valor (R$)", step=10.0, key="or_valor")
+        if st.button("+ Adicionar ao orçamento", type="primary"):
+            if n_desc:
+                db().table("orcamento").insert({
+                    "descricao": n_desc, "data": n_data, "valor": n_valor}).execute()
+                st.success("Adicionado!"); st.rerun()

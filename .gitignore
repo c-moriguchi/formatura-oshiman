@@ -1,0 +1,22 @@
+# jamais commitar segredos
+.streamlit/secrets.toml
+
+# ambientes
+.venv/
+venv/
+env/
+*.egg-info/
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# editor / SO
+.DS_Store
+.idea/
+.vscode/
+
+# artefatos de teste
+/test_out/
+*.pdf
