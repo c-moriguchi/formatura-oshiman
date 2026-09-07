@@ -399,7 +399,9 @@ def tela_login():
     senha = st.text_input("Senha", type="password")
     if st.button("Entrar", type="primary"):
         chave = "SENHA_TESOURARIA" if perfil == "Tesouraria" else "SENHA_CONSULTA"
-        if senha == _secrets_get(chave):
+        esperada = _secrets_get(chave)
+        # No modo demonstração (sem secrets) qualquer senha entra — só p/ testar.
+        if senha == esperada or (_demo_ativo() and not esperada):
             st.session_state["perfil"] = perfil
             st.rerun()
         else:
