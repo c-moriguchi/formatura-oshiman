@@ -17,6 +17,10 @@ __pycache__/
 .idea/
 .vscode/
 
-# artefatos de teste
+# artefatos de teste / gerados
 /test_out/
 *.pdf
+/data.sql
+migracao*.sql
+export_planilha*.xlsx
+/tmp_*.xlsx
