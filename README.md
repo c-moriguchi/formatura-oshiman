@@ -61,6 +61,13 @@ O login em produção usa **conta própria por pessoa** (email + senha) via Supa
    Sem essa linha, a pessoa não consegue entrar. Para tirar o acesso de alguém, remova o usuário no **Authentication → Users** (ou apague a linha de `perfis`).
 4. No modo demonstração (sem Supabase) o app cai no login de senha única dos secrets — é só para testar, não é usado em produção.
 
+#### "Esqueci minha senha" (self-service, sem reset manual)
+O app já tem o link no login. Para o email de recuperação voltar ao app, configure em **Authentication → Settings**:
+- **Site URL** = a URL do seu app (ex.: `https://formatura-oshiman.streamlit.app`).
+- **Redirect URLs** — adicione a mesma URL do app (com e sem barra final).
+- **Enable PKCE flow** = ligado (já é o padrão nos projetos novos; o token vem no endereço, que o app lê).
+Mantenha o template de email **Reset password** (padrão). Quando a pessoa clica em "Esqueci minha senha", ela informa o email, recebe o link, define a nova senha e entra sozinha — você nunca precisa trocar na mão.
+
 ### 4. Rodar local
 ```bash
 python -m venv .venv && source .venv/bin/activate

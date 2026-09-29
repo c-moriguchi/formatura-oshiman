@@ -85,6 +85,46 @@ def _sign_out():
     for k in ("perfil", "auth_user", "auth_token"):
         st.session_state.pop(k, None)
 
+def _auth_client():
+    return create_client(_secrets_get("SUPABASE_URL"), _secrets_get("SUPABASE_SERVICE_KEY"))
+
+
+def _enviar_link_recuperacao(email: str) -> bool:
+    """Dispara o email de recuperação do Supabase (link p/ definir nova senha)."""
+    if not email or not email.strip():
+        return False
+    try:
+        _auth_client().auth.reset_password_for_email(email.strip().lower())
+        return True
+    except Exception:
+        return False
+
+
+def _trocar_senha_por_recovery(code: str, nova_senha: str):
+    """Troca a senha usando o token do link de recuperação e faz login."""
+    try:
+        c = _auth_client()
+        c.auth.exchange_code_for_session(code)          # valida o token do link
+        c.auth.update_user({"password": nova_senha})    # grava a nova senha
+        user = c.auth.get_user().user
+        email = (user.email or "").lower() if user else ""
+        rows = db().table("perfis").select("perfil").eq("email", email).execute().data
+        if not rows:
+            return None
+        st.session_state["auth_user"] = email
+        return rows[0]["perfil"]
+    except Exception:
+        return None
+
+
+def _qp(key: str):
+    """Lê um parâmetro de URL (primeiro valor)."""
+    v = st.query_params.get(key)
+    if isinstance(v, list):
+        return v[0] if v else None
+    return v
+
+
 # ─── CONFIGURAÇÃO (nomes/ano fora do código) ─────────────────────────────────
 def _secrets_get(key: str, default=""):
     """Leitura segura de secrets: retorna default quando não há secrets configurados
@@ -598,26 +638,64 @@ def tela_login():
                         _login_falha()
                         st.error("Senha incorreta")
         else:
-            st.markdown(
-                '<p style="color:#6d7a72;font-size:13px;margin:-6px 0 6px">'
-                'Entre com a conta da comissão (email + senha).</p>',
-                unsafe_allow_html=True)
-            email = st.text_input("E-mail")
-            senha = st.text_input("Senha", type="password")
-            if st.button("Entrar", type="primary", width="stretch"):
-                espera = _login_espera()
-                if espera > 0:
-                    st.warning(f"Muitas tentativas. Aguarde {int(espera)}s "
-                               "antes de tentar de novo.")
-                else:
-                    perfil = _login_supabase(email, senha)
-                    if perfil:
-                        _login_ok()
-                        st.session_state["perfil"] = perfil
-                        st.rerun()
+            qcode = _qp("code")
+            if qcode:  # pessoa clicou no link de recuperação -> define nova senha
+                st.markdown(
+                    '<p style="color:#6d7a72;font-size:13px;margin:-6px 0 6px">'
+                    'Defina sua <b>nova senha</b>:</p>', unsafe_allow_html=True)
+                nova = st.text_input("Nova senha", type="password", key="rec_pass")
+                nova2 = st.text_input("Confirme a nova senha", type="password", key="rec_pass2")
+                confere = bool(nova) and nova == nova2 and len(nova) >= 6
+                if st.button("Salvar nova senha", type="primary", width="stretch"):
+                    if confere:
+                        perfil = _trocar_senha_por_recovery(qcode, nova)
+                        if perfil:
+                            _login_ok()
+                            st.session_state["perfil"] = perfil
+                            st.rerun()
+                        else:
+                            st.error("Não foi possível concluir. Verifique se o link é "
+                                     "válido/recente e se a conta tem perfil definido.")
                     else:
-                        _login_falha()
-                        st.error("E-mail ou senha inválidos — ou conta sem perfil definido.")
+                        st.warning("As senhas não coincidem ou são muito curtas (mínimo 6).")
+            elif st.session_state.get("recuperar"):
+                st.markdown(
+                    '<p style="color:#6d7a72;font-size:13px;margin:-6px 0 6px">'
+                    'Recuperação de senha — informe o email da sua conta:</p>',
+                    unsafe_allow_html=True)
+                remail = st.text_input("E-mail")
+                if st.button("Enviar link de recuperação", type="primary", width="stretch"):
+                    if _enviar_link_recuperacao(remail):
+                        st.info("Link enviado! Confira seu email para definir a nova senha.")
+                    else:
+                        st.error("Não foi possível enviar. Confira o email digitado.")
+                if st.button("Voltar ao login"):
+                    st.session_state.pop("recuperar", None)
+                    st.rerun()
+            else:
+                st.markdown(
+                    '<p style="color:#6d7a72;font-size:13px;margin:-6px 0 6px">'
+                    'Entre com a conta da comissão (email + senha).</p>',
+                    unsafe_allow_html=True)
+                email = st.text_input("E-mail")
+                senha = st.text_input("Senha", type="password")
+                if st.button("Entrar", type="primary", width="stretch"):
+                    espera = _login_espera()
+                    if espera > 0:
+                        st.warning(f"Muitas tentativas. Aguarde {int(espera)}s "
+                                   "antes de tentar de novo.")
+                    else:
+                        perfil = _login_supabase(email, senha)
+                        if perfil:
+                            _login_ok()
+                            st.session_state["perfil"] = perfil
+                            st.rerun()
+                        else:
+                            _login_falha()
+                            st.error("E-mail ou senha inválidos — ou conta sem perfil definido.")
+                if st.button("Esqueci minha senha"):
+                    st.session_state["recuperar"] = True
+                    st.rerun()
 
 
 # ─── MAIN ───────────────────────────────────────────────────────────────────
