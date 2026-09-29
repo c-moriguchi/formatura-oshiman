@@ -748,7 +748,9 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-garantir_draft_mes_anterior()
+# Cria o draft do fechamento apenas para Tesouraria (Consulta nunca grava no banco)
+if is_admin:
+    garantir_draft_mes_anterior()
 
 # Banner de draft pendente (para admin)
 if is_admin:
