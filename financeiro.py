@@ -341,6 +341,17 @@ def total_orcamento(itens) -> float:
     return round(sum(float(i.get("valor", 0.0)) for i in itens), 2)
 
 
+# ─── INVENTÁRIO DE DESPESAS ────────────────────────────────────────────────
+def resumo_despesas(itens) -> dict:
+    """Resumo do inventário: previstas x concretizadas (com nota)."""
+    real = sum(float(i.get("valor", 0.0)) for i in itens
+               if i.get("status") == "concretizada")
+    prev = sum(float(i.get("valor", 0.0)) for i in itens
+               if i.get("status") == "prevista")
+    return {"concretizado": round(real, 2), "previsto": round(prev, 2),
+            "total": round(real + prev, 2), "n": len(itens)}
+
+
 # ─── MATCHING / IMPORTAÇÃO ─────────────────────────────────────────────────
 def match_aluno(descricao: str, alunos_ativos: list):
     up = descricao.upper()

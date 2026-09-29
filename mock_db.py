@@ -150,6 +150,24 @@ def _gera_dados():
         {"id": 4, "descricao": "Mensalidade 2028", "data": "Jan a Dez", "valor": 3900.0},
         {"id": 5, "descricao": "Encerramento", "data": "Dezembro/28", "valor": 600.0},
     ]
+    # despesas (inventário)
+    import base64
+    nota_ex = base64.b64encode(b"NOTA FICTICIA DE DEMO - CONTRATO BUFFET").decode()
+    data["despesas"] = [
+        {"id": 1, "descricao": "Contrato buffet", "categoria": "Buffet",
+         "valor": 3200.0, "data": "2026-02", "fornecedor": "Buffet Festa",
+         "status": "concretizada", "nota_b64": nota_ex,
+         "nota_nome": "nota_buffet.txt", "nota_tipo": "text/plain",
+         "criado_em": "2026-02-10T10:00:00"},
+        {"id": 2, "descricao": "Entrada do salão", "categoria": "Local",
+         "valor": 2500.0, "data": "2026-04", "fornecedor": "Clube XYZ",
+         "status": "prevista", "nota_b64": None, "nota_nome": None, "nota_tipo": None,
+         "criado_em": "2026-03-01T10:00:00"},
+        {"id": 3, "descricao": "Sessão de fotos", "categoria": "Fotografia",
+         "valor": 980.0, "data": "2027-01", "fornecedor": "",
+         "status": "prevista", "nota_b64": None, "nota_nome": None, "nota_tipo": None,
+         "criado_em": "2026-03-01T10:00:00"},
+    ]
     return data
 
 

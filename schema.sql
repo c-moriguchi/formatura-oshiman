@@ -69,6 +69,24 @@ create table if not exists public.perfis (
   nome text                        -- nome exibido na sidebar (opcional)
 );
 
+-- ---------- despesas (inventário: prevista x concretizada) ----------
+-- 'prevista' = previsão de gasto (sem nota ainda).
+-- 'concretizada' = virou real quando a nota foi anexada.
+-- A nota é guardada como base64-texto (nota_b64) junto com nome/tipo p/ baixar.
+create table if not exists public.despesas (
+  id bigserial primary key,
+  descricao text not null,
+  categoria text,
+  valor numeric not null default 0,
+  data text,                       -- 'AAAA-MM-DD' ou 'AAAA-MM' (livre)
+  fornecedor text,
+  status text not null default 'prevista' check (status in ('prevista', 'concretizada')),
+  nota_b64 text,
+  nota_nome text,
+  nota_tipo text,
+  criado_em timestamptz not null default now()
+);
+
 -- Exemplo de como atribuir papel + nome:
 -- insert into public.perfis (email, perfil, nome) values
 --   ('tesoureira@email.com', 'Tesouraria', 'Maria Silva'),

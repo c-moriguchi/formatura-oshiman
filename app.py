@@ -2,6 +2,7 @@ import os
 import io
 import csv
 import re
+import base64
 import datetime
 import urllib.parse
 
@@ -447,6 +448,25 @@ def get_orcamento():
     return db().table("orcamento").select("id,descricao,data,valor").order("data").execute().data
 
 
+def get_despesas():
+    return db().table("despesas").select("*").order("id", desc=True).execute().data
+
+
+def codificar_nota(upload) -> tuple | None:
+    """Retorna (b64, nome, tipo) do arquivo de nota, ou None."""
+    if upload is None:
+        return None
+    data = upload.getvalue()
+    return base64.b64encode(data).decode(), upload.name, upload.type or "application/octet-stream"
+
+
+def nota_bytes(b64: str) -> bytes:
+    try:
+        return base64.b64decode(b64)
+    except Exception:
+        return b""
+
+
 # ─── WHATSAPP (Meta Cloud API — gratuito) ───────────────────────────────────
 def enviar_whatsapp(para: str, mensagem: str) -> bool:
     token = _secrets_get("WA_TOKEN")
@@ -694,7 +714,7 @@ perfil = st.session_state["perfil"]
 is_admin = perfil == "Tesouraria"
 
 SECOES = ["Visão geral", "Mês corrente", "Situação dos alunos",
-          "Extrato", "Fechamentos", "Cadastros"]
+          "Extrato", "Despesas", "Fechamentos", "Cadastros"]
 
 # ─── Sidebar: logo + navegação + sessão ─────────────────────────────────────
 with st.sidebar:
@@ -1125,6 +1145,116 @@ elif secao == "Extrato":
                 if c6.button("Cancelar exclusão"):
                     del st.session_state[f"del_{t['id']}"]
                     st.rerun()
+
+
+# ─── SEÇÃO DESPESAS (inventário — só Tesouraria) ────────────────────────────
+elif secao == "Despesas":
+    if not is_admin:
+        st.markdown('<div class="info-box">🔒 Disponível apenas para Tesouraria.</div>',
+                    unsafe_allow_html=True)
+        st.stop()
+
+    despesas = get_despesas()
+    r = F.resumo_despesas(despesas)
+    cards(
+        ("Concretizado (com nota)", F.fmt_brl(r["concretizado"]), "green"),
+        ("Previsto (sem nota)", F.fmt_brl(r["previsto"]), "orange"),
+        ("Total geral", F.fmt_brl(r["total"]), "blue"),
+        ("Itens", str(r["n"]), "blue"),
+    )
+    st.markdown(
+        '<div class="page-sub">Uma despesa <b>prevista</b> só vira <b>concretizada</b> '
+        'quando a nota é anexada. A nota fica guardada e pode ser baixada.</div>',
+        unsafe_allow_html=True)
+
+    sub_add, sub_inv = st.tabs(["➕ Adicionar despesa", "📋 Inventário"])
+
+    with sub_add:
+        st.markdown("""<div class="info-box">Preencha os dados e, se já tiver a
+        <b>nota</b>, suba o arquivo — a despesa entra como <b>concretizada</b>.
+        Sem nota, fica <b>prevista</b>.</div>""", unsafe_allow_html=True)
+        c1, c2 = st.columns(2)
+        desc = c1.text_input("Descrição", key="dsp_desc")
+        cat = c2.selectbox("Categoria", ["Buffet", "Decoração", "Local", "Fotografia",
+                                         "Som", "Assessoria", "Outra"], key="dsp_cat")
+        c3, c4 = st.columns(2)
+        valor = c3.number_input("Valor (R$)", min_value=0.0, step=10.0, key="dsp_valor")
+        data = c4.text_input("Data (AAAA-MM ou AAAA-MM-DD)", key="dsp_data",
+                             placeholder="2026-08")
+        forn = st.text_input("Fornecedor / observação (opcional)", key="dsp_forn")
+        nota_up = st.file_uploader("Nota (PDF/imagem)", type=["pdf", "png", "jpg", "jpeg"],
+                                   help="Anexe para concretizar a despesa.", key="dsp_nota")
+        if st.button("Salvar despesa", type="primary"):
+            if not desc or valor <= 0:
+                st.warning("Preencha descrição e um valor maior que 0.")
+            else:
+                nota = codificar_nota(nota_up)
+                status = "concretizada" if nota else "prevista"
+                db().table("despesas").insert({
+                    "descricao": desc, "categoria": cat, "valor": valor,
+                    "data": data or "", "fornecedor": forn or "",
+                    "status": status,
+                    "nota_b64": nota[0] if nota else None,
+                    "nota_nome": nota[1] if nota else None,
+                    "nota_tipo": nota[2] if nota else None,
+                }).execute()
+                st.success(f"✓ Despesa salva como {'concretizada' if nota else 'prevista'}.")
+                st.rerun()
+
+    with sub_inv:
+        if not despesas:
+            st.info("Nenhuma despesa cadastrada.")
+        else:
+            filtro = st.selectbox("Filtrar", ["Todas", "Previstas", "Concretizadas"],
+                                  label_visibility="collapsed")
+            for d in despesas:
+                if filtro == "Previstas" and d["status"] != "prevista":
+                    continue
+                if filtro == "Concretizadas" and d["status"] != "concretizada":
+                    continue
+                conc = d["status"] == "concretizada"
+                badge = ('<span class="badge badge-green">✅ Concretizada</span>'
+                         if conc else '<span class="badge badge-warn">⏳ Prevista</span>')
+                sub = (f"{d.get('categoria','')} · {d.get('data','')} · "
+                       f"v/ {d.get('fornecedor','') or '—'}").strip(" ·")
+                st.markdown(aluno_card(d["descricao"], sub, badge_html=badge),
+                            unsafe_allow_html=True)
+                c1, c2, c3 = st.columns([1, 1, 1])
+                c1.write(F.fmt_brl(d["valor"]))
+                if conc and d.get("nota_b64"):
+                    c2.download_button(
+                        f"⬇ {d.get('nota_nome','nota')}",
+                        data=nota_bytes(d["nota_b64"]),
+                        file_name=d.get("nota_nome", "nota"),
+                        mime=d.get("nota_tipo") or "application/octet-stream",
+                        key=f"dn_{d['id']}")
+                elif not conc:
+                    if c2.button("🧾 Concretizar com nota", key=f"cn_{d['id']}"):
+                        st.session_state[f"conc_{d['id']}"] = True
+                if c3.button("🗑", key=f"del_d_{d['id']}"):
+                    db().table("despesas").delete().eq("id", d["id"]).execute()
+                    st.rerun()
+
+                # anexar nota a uma prevista (concretiza)
+                if st.session_state.get(f"conc_{d['id']}"):
+                    nota_up2 = st.file_uploader("Nota da despesa", type=["pdf", "png", "jpg", "jpeg"],
+                                                key=f"concup_{d['id']}")
+                    c4, c5 = st.columns(2)
+                    if c4.button("Salvar nota e concretizar", key=f"cs_{d['id']}", type="primary"):
+                        nota = codificar_nota(nota_up2)
+                        if nota:
+                            db().table("despesas").update({
+                                "status": "concretizada",
+                                "nota_b64": nota[0], "nota_nome": nota[1],
+                                "nota_tipo": nota[2],
+                            }).eq("id", d["id"]).execute()
+                            del st.session_state[f"conc_{d['id']}"]
+                            st.rerun()
+                        else:
+                            st.warning("Escolha o arquivo da nota primeiro.")
+                    if c5.button("Cancelar"):
+                        del st.session_state[f"conc_{d['id']}"]
+                        st.rerun()
 
 
 # ─── SEÇÃO 4 — FECHAMENTOS ─────────────────────────────────────────────────

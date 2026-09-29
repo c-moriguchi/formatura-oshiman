@@ -262,3 +262,21 @@ def test_parse_valor_formatos():
     assert F._parse_valor("1.234,56") == 1234.56   # milhar . e decimal ,
     assert F._parse_valor("-3.000,00") == -3000.0  # negativo pt-BR
     assert F._parse_valor("0.05") == 0.05
+
+
+# ─── inventário de despesas ─────────────────────────────────────────────────
+def test_resumo_despesas_prev_vs_concretizado():
+    itens = [
+        {"descricao": "a", "valor": 3200.0, "status": "concretizada"},
+        {"descricao": "b", "valor": 2500.0, "status": "prevista"},
+        {"descricao": "c", "valor": 980.0,  "status": "prevista"},
+    ]
+    r = F.resumo_despesas(itens)
+    assert r["concretizado"] == 3200.0
+    assert r["previsto"] == 3480.0
+    assert r["total"] == 6680.0 and r["n"] == 3
+
+
+def test_resumo_despesas_vazio():
+    r = F.resumo_despesas([])
+    assert r == {"concretizado": 0.0, "previsto": 0.0, "total": 0.0, "n": 0}
