@@ -48,7 +48,20 @@ WA_PHONE_ID = ""
 TESOUREIRAS_WA = "+5511...,+5511..."            # vírgula separa os números
 ```
 
-### 3. Rodar local
+### 3. Login da comissão (Supabase Auth)
+O login em produção usa **conta própria por pessoa** (email + senha) via Supabase Auth:
+1. **Supabase → Authentication → Providers** → habilite **Email** (e desligue "Confirm email" se quiser acesso imediato, ou mantenha ligado para confirmar).
+2. **Authentication → Users → "Add user"** → crie uma conta com o email + senha de cada tesoureira.
+3. No **SQL Editor**, crie a tabela `perfis` (já está no `schema.sql`) e atribua o papel de cada email:
+   ```sql
+   insert into public.perfis (email, perfil) values
+     ('tesoureira@email.com', 'Tesouraria'),
+     ('consulta@email.com',   'Consulta');
+   ```
+   Sem essa linha, a pessoa não consegue entrar. Para tirar o acesso de alguém, remova o usuário no **Authentication → Users** (ou apague a linha de `perfis`).
+4. No modo demonstração (sem Supabase) o app cai no login de senha única dos secrets — é só para testar, não é usado em produção.
+
+### 4. Rodar local
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -58,7 +71,7 @@ streamlit run app.py
 - **Sem** Supabase configurado (ou com `DEMO=1`) → entra em **modo demonstração**
   com dados fictícios, pra você navegar sem risco.
 
-### 4. Publicar (Streamlit Community Cloud)
+### 5. Publicar (Streamlit Community Cloud)
 1. Suba o repo no GitHub.
 2. Em [share.streamlit.io](https://share.streamlit.io) → New app → escolha o repo/branch.
 3. **Advanced settings → Secrets**: cole o mesmo conteúdo do `secrets.toml`.

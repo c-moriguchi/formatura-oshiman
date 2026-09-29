@@ -59,6 +59,20 @@ create table if not exists public.orcamento (
   valor numeric not null default 0
 );
 
+-- ---------- perfis (login via Supabase Auth) ----------
+-- Cada usuario do Auth precisa de uma linha aqui definindo o papel.
+-- Insira com o email exato da conta (minúsculo). Se o papel não existir,
+-- a pessoa não consegue entrar (o app bloqueia).
+create table if not exists public.perfis (
+  email text primary key,
+  perfil text not null check (perfil in ('Tesouraria', 'Consulta'))
+);
+
+-- Exemplo de como atribuir papel:
+-- insert into public.perfis (email, perfil) values
+--   ('tesoureira@email.com', 'Tesouraria'),
+--   ('consulta@email.com',  'Consulta');
+
 -- (Opcional) Habilite Row Level Security e políticas se quiser usar anon key
 -- em vez de service_role. Para um app interno de comissão, service_role nos
 -- secrets do Streamlit é aceitável — mas nunca exponha a service key no navegador.

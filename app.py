@@ -43,6 +43,48 @@ def _login_falha():
 def _login_ok():
     _SEG_LOGIN["falhas"] = 0
 
+
+# ─── Auth: Supabase (produção) ─────────────────────────────────────────────
+def _login_supabase(email: str, senha: str) -> str | None:
+    """Autentica no Supabase Auth e retorna o perfil (Tesouraria/Consulta) ou None."""
+    url = _secrets_get("SUPABASE_URL")
+    key = _secrets_get("SUPABASE_SERVICE_KEY")
+    email = (email or "").strip().lower()
+    if not url or not key or not email or not senha:
+        return None
+    try:
+        client = create_client(url, key)
+        resp = client.auth.sign_in_with_password({"email": email, "password": senha})
+    except Exception:
+        return None
+    user_email = (resp.user.email if resp.user else email)
+    try:
+        rows = db().table("perfis").select("perfil").eq("email", user_email.lower()).execute().data
+        if not rows:
+            return None  # conta válida, mas sem papel atribuído
+        perfil = rows[0]["perfil"]
+    except Exception:
+        return None
+    st.session_state["auth_user"] = user_email.lower()
+    try:
+        if resp.session and resp.session.access_token:
+            st.session_state["auth_token"] = resp.session.access_token
+    except Exception:
+        pass
+    return perfil
+
+
+def _sign_out():
+    """Encerra a sessão no Supabase (melhor esforço) e limpa o estado local."""
+    url, key = _secrets_get("SUPABASE_URL"), _secrets_get("SUPABASE_SERVICE_KEY")
+    if url and key:
+        try:
+            create_client(url, key).auth.sign_out()
+        except Exception:
+            pass
+    for k in ("perfil", "auth_user", "auth_token"):
+        st.session_state.pop(k, None)
+
 # ─── CONFIGURAÇÃO (nomes/ano fora do código) ─────────────────────────────────
 def _secrets_get(key: str, default=""):
     """Leitura segura de secrets: retorna default quando não há secrets configurados
@@ -536,24 +578,46 @@ def tela_login():
         </div></div>
         """, unsafe_allow_html=True)
 
-        perfil = st.selectbox("Perfil de acesso", ["Tesouraria", "Consulta"])
-        senha = st.text_input("Senha", type="password")
-        if st.button("Entrar", type="primary", width="stretch"):
-            espera = _login_espera()
-            if espera > 0:
-                st.warning(f"Muitas tentativas. Aguarde {int(espera)}s "
-                           "antes de tentar de novo.")
-            else:
-                chave = "SENHA_TESOURARIA" if perfil == "Tesouraria" else "SENHA_CONSULTA"
-                esperada = _secrets_get(chave)
-                # No modo demonstração (sem secrets) qualquer senha entra — só p/ testar.
-                if senha == esperada or (_demo_ativo() and not esperada):
-                    _login_ok()
-                    st.session_state["perfil"] = perfil
-                    st.rerun()
+        if _demo_ativo():
+            # Modo demonstração: sem Supabase, qualquer senha entra (pra testar).
+            perfil = st.selectbox("Perfil de acesso", ["Tesouraria", "Consulta"])
+            senha = st.text_input("Senha", type="password")
+            if st.button("Entrar", type="primary", width="stretch"):
+                espera = _login_espera()
+                if espera > 0:
+                    st.warning(f"Muitas tentativas. Aguarde {int(espera)}s "
+                               "antes de tentar de novo.")
                 else:
-                    _login_falha()
-                    st.error("Senha incorreta")
+                    esperada = _secrets_get("SENHA_TESOURARIA" if perfil == "Tesouraria"
+                                            else "SENHA_CONSULTA")
+                    if not esperada or senha == esperada:
+                        _login_ok()
+                        st.session_state["perfil"] = perfil
+                        st.rerun()
+                    else:
+                        _login_falha()
+                        st.error("Senha incorreta")
+        else:
+            st.markdown(
+                '<p style="color:#6d7a72;font-size:13px;margin:-6px 0 6px">'
+                'Entre com a conta da comissão (email + senha).</p>',
+                unsafe_allow_html=True)
+            email = st.text_input("E-mail")
+            senha = st.text_input("Senha", type="password")
+            if st.button("Entrar", type="primary", width="stretch"):
+                espera = _login_espera()
+                if espera > 0:
+                    st.warning(f"Muitas tentativas. Aguarde {int(espera)}s "
+                               "antes de tentar de novo.")
+                else:
+                    perfil = _login_supabase(email, senha)
+                    if perfil:
+                        _login_ok()
+                        st.session_state["perfil"] = perfil
+                        st.rerun()
+                    else:
+                        _login_falha()
+                        st.error("E-mail ou senha inválidos — ou conta sem perfil definido.")
 
 
 # ─── MAIN ───────────────────────────────────────────────────────────────────
@@ -585,11 +649,13 @@ with st.sidebar:
     <span class="badge {'badge-green' if is_admin else 'badge-blue'}"
           style="margin-top:16px">{'🔑 Tesouraria' if is_admin else '👁 Consulta'}</span>
     """, unsafe_allow_html=True)
+    if st.session_state.get("auth_user"):
+        st.caption(esc(st.session_state["auth_user"]))
     if _demo_ativo():
         st.markdown('<span class="sb-badge">Ambiente de demonstração</span>',
                     unsafe_allow_html=True)
     if st.button("Sair"):
-        del st.session_state["perfil"]
+        _sign_out()
         st.rerun()
 
 # ─── Cabeçalho da área principal ────────────────────────────────────────────
@@ -1000,7 +1066,7 @@ elif secao == "Fechamentos":
         if is_admin:
             if st.button(f"Confirmar fechamento de {F.fmt_mes(mes_anterior)}", type="primary"):
                 with st.spinner("Confirmando e notificando..."):
-                    confirmar_fechamento(mes_anterior, perfil)
+                    confirmar_fechamento(mes_anterior, st.session_state.get("auth_user") or perfil)
                     devedores = [r for r in rows_prev if r[4].startswith("🔴")]
                     corpo = (f"Fechamento de {F.fmt_mes(mes_anterior)} confirmado.\n"
                              f"Devedores: {len(devedores)}\n"
