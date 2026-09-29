@@ -216,3 +216,49 @@ def test_paga_240_falta_60_para_marco():
     assert ana["divida"] == 60.0
     c = _calcular(240.0, "2026-03")
     assert c["divida_mensal"] == 60.0 and c["mes_inicial_debito"] == "2026-03"
+
+
+# ─── importação de extrato (case 2) ─────────────────────────────────────────
+def test_linha_informativa():
+    assert F.linha_informativa("SALDO EM 30/04 DE 1234,56")
+    assert F.linha_informativa("EXTRATO DE MAIO")
+    assert F.linha_informativa("LIMITE DO CARTÃO")
+    assert not F.linha_informativa("PIX TRANSF CRISTIN14/04")
+
+
+def test_parse_extrato_duplicado_saldo_e_classificacao():
+    alunos = [{"id": "07A", "nome": "Giovana Oshiro", "termos_pix": "CRISTIN"}]
+    texto = (
+        "14/04/2025,PIX TRANSF CRISTIN14/04,200.00\n"
+        "14/04/2025,PIX TRANSF CRISTIN14/04,200.00\n"   # duplicado no arquivo
+        "15/04/2025,SALDO,12345.67\n"                    # informativa
+        "15/04/2025,INT APLICACAO PRIVILEGE,-3000.00\n"  # aplicação (investimento)
+        "15/04/2025,REND PAGO APLIC AUT MAIS,0.05\n"     # rendimento
+        "16/04/2025,TED LOCAL BUFFET,-500.00\n"          # despesa
+    )
+    novas, duplicadas, ignoradas = F.parse_extrato(texto, alunos, set())
+    assert len(duplicadas) == 1          # a linha repetida foi apontada e não processada
+    assert len(ignoradas) == 1 and "SALDO" in ignoradas[0]["descricao"].upper()
+    assert len(novas) == 4
+    cats = {n["categoria"] for n in novas}
+    # o primeiro lançamento é mensalidade do aluno identificado
+    assert novas[0]["categoria"] == "MENSALIDADE" and novas[0]["aluno_id"] == "07A"
+    assert "INVESTIMENTO" in cats        # débito p/ aplicação
+    assert "RENDIMENTO" in cats          # remuneração extra (centavos)
+    assert "SAIDA" in cats               # débito p/ despesa (não localizada como aplicação)
+
+
+def test_parse_extrato_dedup_com_banco_ja_existente():
+    alunos = [{"id": "10B", "nome": "Kenji Yoshida", "termos_pix": "WILSON"}]
+    texto = "14/04/2025,PIX TRANSF WILSON03/04,250.00\n"
+    ja = {("2025-04-14", "PIX TRANSF WILSON03/04", 250.0)}
+    novas, duplicadas, _ = F.parse_extrato(texto, alunos, ja)
+    assert novas == [] and len(duplicadas) == 1
+
+
+def test_parse_valor_formatos():
+    assert F._parse_valor("250.00") == 250.0       # ponto decimal
+    assert F._parse_valor("250,00") == 250.0       # vírgula decimal (pt-BR)
+    assert F._parse_valor("1.234,56") == 1234.56   # milhar . e decimal ,
+    assert F._parse_valor("-3.000,00") == -3000.0  # negativo pt-BR
+    assert F._parse_valor("0.05") == 0.05

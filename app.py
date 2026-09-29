@@ -566,31 +566,23 @@ def gerar_pdf(ym, periodos, alunos, trans_rows) -> bytes:
 
 
 # ─── IMPORT / MATCHING ──────────────────────────────────────────────────────
-def parse_csv(texto: str, alunos_ativos: list) -> list:
-    linhas = []
-    sep = ";" if texto.count(";") > texto.count(",") else ","
-    for parts in csv.reader(io.StringIO(texto), delimiter=sep):
-        parts = [p.strip().strip("\"'") for p in parts]
-        if len(parts) < 3:
-            continue
-        dm = re.match(r"(\d{2})/(\d{2})/(\d{4})", parts[0])
-        if not dm:
-            continue
-        data = f"{dm.group(3)}-{dm.group(2)}-{dm.group(1)}"
+def _ja_existentes() -> set:
+    """Conjunto (data, descricao, valor) já no banco — p/ detectar duplicados."""
+    rows = db().table("transacoes").select("data,descricao,valor").execute().data
+    return {(r["data"], r["descricao"], round(float(r["valor"]), 2)) for r in rows}
+
+
+def _texto_extrato(upload) -> str:
+    """Decodifica bytes de um arquivo CSV/txt uploadado em texto."""
+    if upload is None:
+        return ""
+    raw = upload.getvalue()
+    for enc in ("utf-8-sig", "utf-8", "latin-1"):
         try:
-            valor = float(parts[2].replace(".", "").replace(",", "."))
+            return raw.decode(enc)
         except Exception:
             continue
-        desc = parts[1]
-        if db().table("transacoes").select("id").eq("data", data) \
-                .eq("descricao", desc).execute().data:
-            continue
-        aluno_id, aluno_nome = F.match_aluno(desc, alunos_ativos)
-        categoria = F.detecta_categoria(desc, valor, bool(aluno_id))
-        linhas.append({"data": data, "descricao": desc, "valor": valor,
-                       "aluno_id": aluno_id, "aluno_nome": aluno_nome,
-                       "categoria": categoria})
-    return linhas
+    return raw.decode("utf-8", errors="replace")
 
 
 # ─── LOGIN ──────────────────────────────────────────────────────────────────
@@ -785,9 +777,14 @@ if secao == "Visão geral":
     cards(
         ("Em conta corrente", F.fmt_brl(p["saldo_conta"]), "blue"),
         ("Aplicado no investimento", F.fmt_brl(p["saldo_invest"]), "orange"),
-        ("Total de aportes", F.fmt_brl(p["aportes"]), "blue"),
-        ("Resgates", F.fmt_brl(p["resgates"]), "green"),
+        ("Rendimentos", F.fmt_brl(p["rendimento"]), "green"),
+        ("Despesas", F.fmt_brl(-p["despesas"]) if p["despesas"] else "—", "red"),
     )
+    st.markdown(
+        '<div class="page-sub">Identidade: total = conta corrente + investimento + '
+        'rendimentos − despesas. Despesas = saídas não reconhecidas como aplicação '
+        '(controle/inventário de despesas em breve).</div>',
+        unsafe_allow_html=True)
 
     # Arrecadação por ano (meta x atingido)
     st.markdown(sec("Arrecadação por ano"), unsafe_allow_html=True)
@@ -967,32 +964,49 @@ elif secao == "Extrato":
 
     with sub_import:
         st.markdown("""
-        <div class="info-box">Cole o extrato do banco. Formato: <strong>DD/MM/AAAA; Descrição; Valor</strong>
-        (vírgula ou ponto-e-vírgula). Valores negativos = saídas. A primeira linha pode ser cabeçalho.</div>
+        <div class="info-box">Suba o <strong>extrato CSV do banco</strong> (ou cole). Formato:
+        <strong>DD/MM/AAAA; Descrição; Valor</strong> (vírgula ou ponto-e-vírgula). Valores
+        negativos = saídas. <strong>Linhas de SALDO/EXTRATO são ignoradas</strong> e
+        <strong>lançamentos duplicados são apontados e não processados</strong>.</div>
         """, unsafe_allow_html=True)
 
-        csv_texto = st.text_area("Extrato (CSV)", height=160,
-            placeholder="14/04/2025,PIX TRANSF MARGARE14/04,200.00\n15/04/2025,INT APLICACAO PRIVILEGE,-3000.00")
+        arquivo = st.file_uploader("Extrato (CSV/TXT)", type=["csv", "txt"],
+                                   help="Baixe o extrato do banco e suba aqui.")
+        csv_texto = st.text_area("Ou cole o extrato aqui", height=120,
+            placeholder="14/04/2025,PIX TRANSF MARGARE14/04,200.00\n15/04/2025,INT APLICACAO PRIVILEGE,-3000.00\n15/04/2025,SALDO,")
 
         if st.button("Analisar extrato", type="primary"):
-            if not csv_texto.strip():
-                st.warning("Cole o extrato antes de analisar.")
+            texto = _texto_extrato(arquivo) or csv_texto
+            if not (texto or "").strip():
+                st.warning("Suba um arquivo ou cole o extrato antes de analisar.")
             else:
                 with st.spinner("Analisando..."):
                     alunos_ativos = db().table("alunos").select("id,nome,termos_pix") \
                         .eq("status", "Ativo").execute().data
-                    linhas = parse_csv(csv_texto, alunos_ativos)
+                    linhas, duplicadas, ignoradas = F.parse_extrato(texto, alunos_ativos,
+                                                                    _ja_existentes())
+                if duplicadas:
+                    st.warning(f"🚫 **{len(duplicadas)}** lançamento(s) duplicado(s) "
+                               "ignorado(s) (já no banco ou repetido no arquivo).")
+                if ignoradas:
+                    st.info(f"ℹ️ **{len(ignoradas)}** linha(s) informativa(s)/de "
+                            "saldo ignorada(s).")
                 if not linhas:
-                    st.info("Nenhuma linha nova encontrada (já importadas ou formato inválido).")
+                    st.info("Nenhuma linha nova encontrada (já importadas, informativas "
+                            "ou formato inválido).")
                 else:
                     st.session_state["pending"] = linhas
+                    st.session_state["pend_resumo"] = (len(linhas), len(duplicadas),
+                                                       len(ignoradas))
                     st.rerun()
 
         if "pending" in st.session_state:
             linhas = st.session_state["pending"]
+            nd, ndup, nig = st.session_state.get("pend_resumo", (len(linhas), 0, 0))
             nao_id = [l for l in linhas if not l["aluno_id"] and l["categoria"] in ("OUTRO", "SAIDA")]
 
-            st.success(f"**{len(linhas)}** linha(s) novas. " +
+            extra = f" | 🚫 {ndup} duplicados ignorados" if ndup else ""
+            st.success(f"**{nd}** linha(s) nova(s){extra}. " +
                 (f"**{len(nao_id)}** precisam de identificação manual."
                  if nao_id else "Todas identificadas ✓"))
 

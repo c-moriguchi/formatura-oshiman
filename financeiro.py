@@ -15,6 +15,9 @@ os usados no banco:
 
 import datetime
 import html as _html
+import io
+import csv
+import re
 from collections import defaultdict
 
 # Categorias "econômicas" que somam para o patrimônio real (exclui as transferências
@@ -293,6 +296,10 @@ def calcular_painel(trans_rows, periodos, alunos, ate_ym: str) -> dict:
     saldo_conta = sum(float(r["valor"]) for r in trans_rows)
     saldo_invest = aportes - resgates
 
+    # despesas = saídas reais (despesas do evento) + débitos não identificados
+    despesas = abs(sum(float(r["valor"]) for r in trans_rows
+                       if r["categoria"] in ("SAIDA", "OUTRO") and r["valor"] < 0))
+
     # Inadimplência = soma dos débitos dos ativos até ate_ym
     trans = carregar_transacoes_agrupadas(trans_rows)
     inadimplencia = 0.0
@@ -314,6 +321,7 @@ def calcular_painel(trans_rows, periodos, alunos, ate_ym: str) -> dict:
         "aportes": round(aportes, 2),
         "resgates": round(resgates, 2),
         "saldo_invest": round(saldo_invest, 2),
+        "despesas": round(despesas, 2),
         "patrimonio": round(saldo_conta + saldo_invest, 2),
         "n_ativos": n_ativos,
         "arrecadacao_por_ano": arrecadacao_por_ano(trans_rows),
@@ -357,3 +365,65 @@ def detecta_categoria(descricao: str, valor: float, tem_aluno: bool) -> str:
     if tem_aluno:
         return "MENSALIDADE" if valor > 0 else "DEVOLUCAO"
     return "SAIDA" if valor < 0 else "OUTRO"
+
+
+# ─── IMPORTAÇÃO DE EXTRATO (robusta) ────────────────────────────────────────
+# "informativas" = linhas que o banco coloca no extrato mas não são lançamentos
+# (ex.: SALDO, EXTRATO, LIMITE). São ignoradas na importação.
+INFORMATIVAS = ("SALDO", "EXTRATO", "LIMITE", "ENC.EMP", "ANIVERSARIO")
+
+
+def linha_informativa(descricao: str) -> bool:
+    up = descricao.upper()
+    return any(k in up for k in INFORMATIVAS)
+
+
+def _parse_valor(s: str) -> float:
+    """Converte valor do extrato aceitando pt-BR e padrão ponto:
+    '1.234,56' -> 1234.56 | '1234.56' -> 1234.56 | '250,00' -> 250.0"""
+    s = s.strip().replace(" ", "")
+    if "," in s and "." in s:      # pt-BR: '.' milhar e ',' decimal
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s:                 # só vírgula: decimal é vírgula
+        s = s.replace(",", ".")
+    return float(s)                # só ponto (ou nenhum): deixa o ponto como decimal
+
+
+def parse_extrato(texto: str, alunos_ativos: list, ja_existem: set) -> tuple:
+    """Parseia um extrato CSV e devolve (novas, duplicadas, ignoradas).
+
+    - novas     : lançamentos novos, já classificados (data/valor/aluno/categoria)
+    - duplicadas: já existem no banco (data+descricao+valor) ou se repetem no próprio arquivo
+    - ignoradas : linhas informativas (SALDO etc.) ou sem valor numérico
+    - "ja_existem": set de (data, descricao, valor) que já estão no banco
+    """
+    linhas, duplicadas, ignoradas = [], [], []
+    sep = ";" if texto.count(";") > texto.count(",") else ","
+    visto = set()
+    for parts in csv.reader(io.StringIO(texto), delimiter=sep):
+        parts = [p.strip().strip("\"'") for p in parts]
+        if len(parts) < 3:
+            continue
+        dm = re.match(r"(\d{2})/(\d{2})/(\d{4})", parts[0])
+        if not dm:
+            continue
+        data = f"{dm.group(3)}-{dm.group(2)}-{dm.group(1)}"
+        desc = parts[1]
+        try:
+            valor = _parse_valor(parts[2])
+        except Exception:
+            continue  # sem valor numérico -> não é lançamento
+        if linha_informativa(desc):
+            ignoradas.append({"data": data, "descricao": desc, "valor": valor})
+            continue
+        chave = (data, desc, round(valor, 2))
+        if chave in ja_existem or chave in visto:
+            duplicadas.append({"data": data, "descricao": desc, "valor": valor})
+            continue
+        visto.add(chave)
+        aluno_id, aluno_nome = match_aluno(desc, alunos_ativos)
+        categoria = detecta_categoria(desc, valor, bool(aluno_id))
+        linhas.append({"data": data, "descricao": desc, "valor": valor,
+                       "aluno_id": aluno_id, "aluno_nome": aluno_nome,
+                       "categoria": categoria})
+    return linhas, duplicadas, ignoradas
