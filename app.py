@@ -1106,13 +1106,26 @@ elif secao == "Extrato":
                 (f"**{len(nao_id)}** precisam de identificação manual."
                  if nao_id else "Todas identificadas ✓"))
 
+            nao_pos = [l for l in nao_id if l["categoria"] == "OUTRO" and l["valor"] > 0]
+
+            if nao_pos:
+                st.warning(
+                    f"🔎 **{len(nao_pos)}** **pagamento(s) NÃO identificado(s)** — "
+                    "provavelmente vindo de **outra conta, caixa ou TED** (sem nome/PIX "
+                    "que o app reconheça). Atribua ao aluno; se quiser, salve a "
+                    "**chave** (CPF/nome) para o app identificar automaticamente "
+                    "neste cenário no futuro.")
+
             if nao_id:
                 alunos_opts = db().table("alunos").select("id,nome").eq("status", "Ativo").execute().data
                 opts_map = {a["nome"]: a["id"] for a in alunos_opts}
                 st.markdown(sec("Identificar manualmente"), unsafe_allow_html=True)
-                for l in nao_id:
-                    gi = linhas.index(l)
-                    st.markdown(f"**{l['data']}** · {l['descricao']} · `{F.fmt_brl(l['valor'])}`")
+                for gi, l in enumerate(linhas):
+                    if l.get("aluno_id") or l["categoria"] not in ("OUTRO", "SAIDA"):
+                        continue
+                    eh_pgto = l["categoria"] == "OUTRO" and l["valor"] > 0
+                    rot = ' 🔎' if eh_pgto else ''
+                    st.markdown(f"**{l['data']}** · {l['descricao']} · `{F.fmt_brl(l['valor'])}`{rot}")
                     opcoes = ["— não identificado —", "Investimento/Saída", "Devolução s/ aluno"] + list(opts_map.keys())
                     escolha = st.selectbox("Atribuir a:", opcoes, key=f"attr_{gi}")
                     if escolha == "Investimento/Saída":
@@ -1124,6 +1137,10 @@ elif secao == "Extrato":
                         linhas[gi].update({
                             "aluno_id": opts_map[escolha], "aluno_nome": escolha,
                             "categoria": "MENSALIDADE" if l["valor"] > 0 else "DEVOLUCAO"})
+                    if eh_pgto:
+                        linhas[gi]["rotulo"] = st.text_input(
+                            "Chave p/ identificar no futuro (CPF/nome/observação) — opcional",
+                            key=f"rot_{gi}", placeholder="ex.: 123.456.789-00 e/ou nome do pagador")
 
             st.markdown(sec("Prévia"), unsafe_allow_html=True)
             st.dataframe(pd.DataFrame([{
@@ -1144,8 +1161,29 @@ elif secao == "Extrato":
                     devol_ids = {l["aluno_id"] for l in linhas
                                  if l["categoria"] == "DEVOLUCAO" and l["aluno_id"]}
                     revogados = revogar_acessos(list(devol_ids))
+                    # Rótulos de pagamento não identificado -> vira apelido PIX do aluno
+                    auto = 0
+                    for l in linhas:
+                        tok = ((l.get("rotulo") or "").strip().upper())
+                        if l.get("categoria") == "MENSALIDADE" and l.get("aluno_id") and tok:
+                            try:
+                                al = db().table("alunos").select("termos_pix") \
+                                    .eq("id", l["aluno_id"]).execute().data
+                                if al:
+                                    termos = [t.strip() for t in
+                                              (al[0].get("termos_pix") or "").split(",") if t.strip()]
+                                    if tok not in termos:
+                                        termos.append(tok)
+                                    db().table("alunos").update(
+                                        {"termos_pix": ",".join(termos)}
+                                    ).eq("id", l["aluno_id"]).execute()
+                                    auto += 1
+                            except Exception:
+                                pass
                 del st.session_state["pending"]
                 msg = f"✓ {len(linhas)} transações salvas!"
+                if auto:
+                    msg += f" · 🔑 {auto} chave(s) salvas para match futuro."
                 if revogados:
                     msg += f" · 🔒 acesso de {revogados} conta(s) revogado (desistência)."
                 st.success(msg)

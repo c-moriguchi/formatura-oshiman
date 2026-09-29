@@ -260,6 +260,17 @@ def test_parse_extrato_dedup_com_banco_ja_existente():
     assert novas == [] and len(duplicadas) == 1
 
 
+def test_parse_extrato_ted_nao_identificado_e_outro():
+    """Pagamento via TED/outra conta que o app não reconhece -> OUTRO, sem aluno,
+    para a tesoureira ajustar e depois identificar automaticamente."""
+    alunos = [{"id": "01A", "nome": "Ana", "termos_pix": "REGINA"}]
+    texto = "15/03/2025,TED RECEBIDO 12345678901 - OUTRA EMPRESA,500.00\n"
+    novas, dup, ign = F.parse_extrato(texto, alunos, set())
+    assert len(novas) == 1
+    n = novas[0]
+    assert n["categoria"] == "OUTRO" and n["aluno_id"] is None and n["valor"] == 500.0
+
+
 def test_parse_valor_formatos():
     assert F._parse_valor("250.00") == 250.0       # ponto decimal
     assert F._parse_valor("250,00") == 250.0       # vírgula decimal (pt-BR)
