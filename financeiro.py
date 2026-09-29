@@ -14,6 +14,7 @@ os usados no banco:
 """
 
 import datetime
+import html as _html
 from collections import defaultdict
 
 # Categorias "econômicas" que somam para o patrimônio real (exclui as transferências
@@ -26,6 +27,18 @@ CAT_DEVOL    = {"DEVOLUCAO"}
 
 MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
          "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+
+
+# ─── SANITIZAÇÃO HTML (usada na hora de renderizar com unsafe_allow_html) ───
+class Html(str):
+    """Marca uma string como HTML JÁ SEGURO (não escapar) em render_table."""
+
+    pass
+
+
+def esc(v) -> str:
+    """Escape HTML de dados vindos do banco/usuario antes de exibir no app."""
+    return _html.escape(str(v) if v is not None else "", quote=True)
 
 
 # ─── DATA ───────────────────────────────────────────────────────────────────

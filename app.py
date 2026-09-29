@@ -17,6 +17,31 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
 import financeiro as F
+from financeiro import esc, Html
+
+# ─── Proteção simples contra força bruta no login (senhas compartilhadas) ───
+import time as _time
+
+_SEG_LOGIN = {"falhas": 0, "travar_ate": 0.0}
+
+
+def _login_espera() -> float:
+    """Segundos restantes de bloqueio global (0 = liberado)."""
+    return max(0.0, _SEG_LOGIN["travar_ate"] - _time.time())
+
+
+def _login_falha():
+    now = _time.time()
+    if now < _SEG_LOGIN["travar_ate"]:
+        return
+    _SEG_LOGIN["falhas"] += 1
+    if _SEG_LOGIN["falhas"] >= 20:   # spray: trava login global por 60s
+        _SEG_LOGIN["travar_ate"] = now + 60
+        _SEG_LOGIN["falhas"] = 0
+
+
+def _login_ok():
+    _SEG_LOGIN["falhas"] = 0
 
 # ─── CONFIGURAÇÃO (nomes/ano fora do código) ─────────────────────────────────
 def _secrets_get(key: str, default=""):
@@ -232,19 +257,24 @@ def sec(t: str) -> str:
 
 
 def render_table(headers, rows, right_align=(), empty="Nenhum dado.") -> str:
-    """Tabela HTML responsiva — funciona bem no celular, ao contrário de st.dataframe."""
+    """Tabela HTML responsiva. Células são ESCAPADAS por padrão; envolva com
+    Html(...) para injetar HTML intencional (ex.: badges) de forma segura."""
     thead = "".join(
-        f'<th class="num">{h}</th>' if i in right_align else f"<th>{h}</th>"
+        f'<th class="num">{esc(h)}</th>' if i in right_align else f"<th>{esc(h)}</th>"
         for i, h in enumerate(headers))
     body = ""
     for r in rows:
         tds = []
         for ci, val in enumerate(r):
             cls = ' class="num"' if ci in right_align else ""
-            tds.append(f"<td{cls}>{val}</td>")
+            if isinstance(val, Html):
+                cell = str(val)
+            else:
+                cell = esc(val)
+            tds.append(f"<td{cls}>{cell}</td>")
         body += "<tr>" + "".join(tds) + "</tr>"
     if not rows:
-        body = f'<tr><td class="empty" colspan="{len(headers)}">{empty}</td></tr>'
+        body = f'<tr><td class="empty" colspan="{len(headers)}">{esc(empty)}</td></tr>'
     return (f'<div class="table-wrap"><table class="tbl">'
             f"<thead><tr>{thead}</tr></thead><tbody>{body}</tbody></table></div>")
 
@@ -262,8 +292,8 @@ def aluno_card(nome: str, sub: str, badge_html: str = "", ic: str = "",
     cls = "aluno-card-inativo" if inativo else "aluno-card"
     ncls = "aluno-nome-inativo" if inativo else "aluno-nome"
     return (f'<div class="{cls}"><div class="aluno-top">'
-            f'<span class="{ncls}">{nome}{ic}</span>{badge_html}</div>'
-            f'<div class="aluno-sub">{sub}</div></div>')
+            f'<span class="{ncls}">{esc(nome)}{ic}</span>{badge_html}</div>'
+            f'<div class="aluno-sub">{esc(sub)}</div></div>')
 
 
 def wa_link(cel: str, msg: str) -> str:
@@ -501,7 +531,7 @@ def tela_login():
         st.markdown(f"""
         <div class="login-wrap"><div class="login-head">
           <div class="login-logo">🎓</div>
-          <h2>{CFG['nome_comissao']}</h2>
+          <h2>{esc(CFG['nome_comissao'])}</h2>
           <p>Gestão Financeira da Comissão</p>
         </div></div>
         """, unsafe_allow_html=True)
@@ -509,14 +539,21 @@ def tela_login():
         perfil = st.selectbox("Perfil de acesso", ["Tesouraria", "Consulta"])
         senha = st.text_input("Senha", type="password")
         if st.button("Entrar", type="primary", width="stretch"):
-            chave = "SENHA_TESOURARIA" if perfil == "Tesouraria" else "SENHA_CONSULTA"
-            esperada = _secrets_get(chave)
-            # No modo demonstração (sem secrets) qualquer senha entra — só p/ testar.
-            if senha == esperada or (_demo_ativo() and not esperada):
-                st.session_state["perfil"] = perfil
-                st.rerun()
+            espera = _login_espera()
+            if espera > 0:
+                st.warning(f"Muitas tentativas. Aguarde {int(espera)}s "
+                           "antes de tentar de novo.")
             else:
-                st.error("Senha incorreta")
+                chave = "SENHA_TESOURARIA" if perfil == "Tesouraria" else "SENHA_CONSULTA"
+                esperada = _secrets_get(chave)
+                # No modo demonstração (sem secrets) qualquer senha entra — só p/ testar.
+                if senha == esperada or (_demo_ativo() and not esperada):
+                    _login_ok()
+                    st.session_state["perfil"] = perfil
+                    st.rerun()
+                else:
+                    _login_falha()
+                    st.error("Senha incorreta")
 
 
 # ─── MAIN ───────────────────────────────────────────────────────────────────
@@ -536,7 +573,7 @@ with st.sidebar:
     <div class="sb-logo">
       <div class="sb-logo-ico">🎓</div>
       <div>
-        <div class="sb-name">{CFG['nome_curto']}</div>
+        <div class="sb-name">{esc(CFG['nome_curto'])}</div>
         <div class="sb-sub">Gestão financeira</div>
       </div>
     </div>
@@ -619,7 +656,7 @@ if secao == "Visão geral":
         cls = "green" if pct >= 100 else ("orange" if pct >= 70 else "red")
         rows.append([
             ano, F.fmt_brl(pago), F.fmt_brl(meta),
-            f'<span class="{cls}" style="font-weight:700">{pct:.0f}%</span>'
+            Html(f'<span class="{cls}" style="font-weight:700">{pct:.0f}%</span>')
         ])
     st.markdown(render_table(
         ["Ano", "Pago", "Meta", "Atingido"], rows,
@@ -630,8 +667,8 @@ if secao == "Visão geral":
     if itens:
         st.markdown(sec("Previsão de orçamento"), unsafe_allow_html=True)
         rows = [[i["descricao"], i["data"], F.fmt_brl(i["valor"])] for i in itens]
-        rows.append(["<strong>Total</strong>", "",
-                     f"<strong>{F.fmt_brl(F.total_orcamento(itens))}</strong>"])
+        rows.append([Html("<strong>Total</strong>"), "",
+                     Html(f"<strong>{F.fmt_brl(F.total_orcamento(itens))}</strong>")])
         st.markdown(render_table(["Item", "Quando", "Valor"], rows,
                                  right_align=(2,)), unsafe_allow_html=True)
 

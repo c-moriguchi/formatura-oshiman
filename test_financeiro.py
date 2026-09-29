@@ -149,3 +149,27 @@ def test_detecta_categoria():
     assert F.detecta_categoria("PIX TRANSF CRISTIN14/04", 200.0, True) == "MENSALIDADE"
     assert F.detecta_categoria("PIX DEVOL", -200.0, True) == "DEVOLUCAO"
     assert F.detecta_categoria("TED PADARIA", -50.0, False) == "SAIDA"
+
+
+# ─── segurança: escape HTML (XSS armazenado) ───────────────────────────────
+def test_esc_bloqueia_script():
+    e = F.esc('<script>alert(1)</script>')
+    assert "<script>" not in e.lower()
+    assert "&lt;script&gt;" in e.lower()
+
+
+def test_esc_escapa_tudo_quando_exige_aspas():
+    e = F.esc('"><img src=x onerror=alert(1)>')
+    assert "<img" not in e.lower()
+    assert "&quot;" in e  # aspas escapadas p/ não furar atributo
+
+
+def test_esc_trata_none_e_numeros():
+    assert F.esc(None) == ""
+    assert F.esc(250.0) == "250.0"
+
+
+def test_html_marca_seguro_sem_escapar():
+    h = F.Html('<span class="badge badge-green">ok</span>')
+    assert isinstance(h, F.Html)
+    assert str(h) == '<span class="badge badge-green">ok</span>'
