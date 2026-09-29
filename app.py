@@ -37,8 +37,8 @@ def config() -> dict:
 CFG = config()
 
 # ─── PAGE CONFIG ────────────────────────────────────────────────────────────
-st.set_page_config(page_title=CFG["nome_curto"], layout="centered",
-                   page_icon="🎓", initial_sidebar_state="collapsed")
+st.set_page_config(page_title=CFG["nome_curto"], layout="wide",
+                   page_icon="🎓", initial_sidebar_state="expanded")
 
 # ─── SUPABASE (service_role — nunca exposta ao browser) ─────────────────────
 def _demo_ativo() -> bool:
@@ -59,93 +59,165 @@ def db():
     return get_supabase()
 
 
-# ─── CSS ────────────────────────────────────────────────────────────────────
+# ─── CSS — novo design (verde profundo, cartões claros, DM Sans/Manrope) ────
 st.markdown("""
 <style>
-[data-testid="stAppViewContainer"] { background:#f7f6f3; }
-[data-testid="stHeader"]  { display:none; }
-[data-testid="stSidebar"] { display:none; }
-.block-container { padding:1rem 1rem 4rem; max-width:760px; }
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Manrope:wght@500;600;700;800&display=swap');
 
-.stat-row { display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap; }
-.stat-card { flex:1; min-width:130px; background:white;
-    border:1px solid #e2e0d8; border-radius:10px; padding:14px; text-align:center; }
-.stat-card .lbl { font-size:11px; color:#8a877e; text-transform:uppercase;
-    letter-spacing:.04em; font-weight:600; }
-.stat-card .val { font-size:20px; font-weight:700; margin-top:4px; }
-.green  { color:#2d6a4f; }
-.red    { color:#b91c1c; }
-.orange { color:#92400e; }
-.blue   { color:#1e40af; }
+html, body, .stApp {
+  font-family: 'DM Sans', sans-serif;
+  background: #f4f5f2;
+  color: #1c2823;
+}
+h1, h2, h3, .stat-card .val, .page-head h1, .login-card h2, .sb-name {
+  font-family: 'Manrope', 'DM Sans', sans-serif;
+}
 
-/* Card de aluno ativo */
-.aluno-card { background:white; border:1px solid #e2e0d8;
-    border-radius:10px; padding:14px 16px; margin-bottom:10px; }
-/* Card de desistente — cinza, sempre no final */
-.aluno-card-inativo { background:#fafafa; border:1px solid #e8e6de;
-    border-radius:10px; padding:14px 16px; margin-bottom:10px; opacity:.75; }
-.aluno-nome  { font-weight:600; font-size:15px; margin-bottom:2px; }
-.aluno-nome-inativo { font-weight:500; font-size:15px; margin-bottom:2px; color:#8a877e; }
-.aluno-sub   { font-size:12px; color:#8a877e; margin-bottom:8px; }
-.wa-ico { text-decoration:none; margin-left:7px; font-size:16px; opacity:.85; }
+[data-testid="stHeader"] { display:none; }
+.block-container { padding:1.6rem 2rem 4rem; max-width:1060px; margin:0 auto; }
+
+/* ── Sidebar ─────────────────────────────────────────────── */
+[data-testid="stSidebar"] {
+  background:#17332a;
+  border-right:none;
+}
+[data-testid="stSidebar"] .block-container { padding:1.4rem 1rem 2rem; max-width:none; }
+.sb-logo { display:flex; align-items:center; gap:12px; margin-bottom:20px; }
+.sb-logo-ico {
+  width:44px; height:44px; border-radius:12px; background:rgba(255,255,255,.1);
+  display:flex; align-items:center; justify-content:center; font-size:22px;
+}
+.sb-name { color:#fff; font-weight:800; font-size:16px; line-height:1.2; }
+.sb-sub { color:#9db8ac; font-size:12px; }
+[data-testid="stSidebar"] .stRadio [role="radiogroup"] { gap:2px; align-items:stretch; }
+[data-testid="stSidebar"] .stRadio label {
+  background:transparent; border-radius:9px; padding:9px 12px;
+  color:#cfe0d8; font-size:14px; transition:background .15s;
+}
+[data-testid="stSidebar"] .stRadio label:hover { background:rgba(255,255,255,.07); color:#fff; }
+[data-testid="stSidebar"] .stRadio label:has(input:checked) {
+  background:rgba(255,255,255,.13); color:#fff; font-weight:600;
+}
+[data-testid="stSidebar"] .stRadio label > div:first-child { display:none; }
+.sb-badge {
+  display:inline-block; margin-top:14px; padding:4px 10px; border-radius:999px;
+  background:rgba(255,255,255,.1); color:#d7e6de; font-size:11.5px; font-weight:600;
+  letter-spacing:.02em;
+}
+[data-testid="stSidebar"] .stButton > button {
+  background:transparent !important; border:1px solid rgba(255,255,255,.28) !important;
+  color:#e7f0ec !important; border-radius:9px !important;
+}
+[data-testid="stSidebar"] .stButton > button:hover {
+  background:rgba(255,255,255,.08) !important;
+}
+[data-testid="stSidebar"] hr { border-color:rgba(255,255,255,.14); }
+
+/* ── Cabeçalho da seção ──────────────────────────────────── */
+.page-head { display:flex; align-items:center; justify-content:space-between;
+  gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+.page-head h1 { font-size:22px; font-weight:800; margin:0; color:#1c2823; }
+.page-sub { font-size:13px; color:#6d7a72; margin-bottom:16px; }
+
+/* ── Cartões de métrica ──────────────────────────────────── */
+.stat-row { display:flex; gap:12px; margin:6px 0 18px; flex-wrap:wrap; }
+.stat-card { flex:1; min-width:150px; background:#fff;
+  border:1px solid #e3e6e0; border-radius:12px; padding:14px 16px; }
+.stat-card .lbl { font-size:11px; color:#6d7a72; text-transform:uppercase;
+  letter-spacing:.05em; font-weight:600; }
+.stat-card .val { font-size:22px; font-weight:800; margin-top:6px; }
+.green  { color:#1f7a4d; }
+.red    { color:#b3372f; }
+.orange { color:#a16207; }
+.blue   { color:#2b5fb8; }
+
+/* ── Títulos de bloco ────────────────────────────────────── */
+.sec-title { font-size:12px; font-weight:700; color:#6d7a72; text-transform:uppercase;
+  letter-spacing:.06em; margin:22px 0 10px; }
+
+/* ── Cartões de aluno ────────────────────────────────────── */
+.aluno-card { background:#fff; border:1px solid #e3e6e0;
+  border-radius:12px; padding:14px 16px; margin-bottom:10px; }
+.aluno-card-inativo { background:#f7f8f6; border:1px solid #e6e9e4;
+  border-radius:12px; padding:14px 16px; margin-bottom:10px; opacity:.75; }
+.aluno-top { display:flex; align-items:center; justify-content:space-between;
+  gap:8px; flex-wrap:wrap; }
+.aluno-nome { font-weight:600; font-size:15px; }
+.aluno-nome-inativo { font-weight:500; font-size:15px; color:#6d7a72; }
+.aluno-sub { font-size:12.5px; color:#6d7a72; margin-top:3px; }
+.wa-ico { text-decoration:none; margin-left:8px; font-size:15px; opacity:.85; }
 .wa-ico:hover { opacity:1; }
 
-.progress { height:8px; background:#e9e7e0; border-radius:6px;
-    overflow:hidden; margin:6px 0 12px; }
-.progress > div { height:100%; background:#2d6a4f; border-radius:6px; }
-.progress-hint { font-size:12px; color:#8a877e; margin-bottom:10px; }
+/* ── Barra de progresso ──────────────────────────────────── */
+.progress { height:8px; background:#e7e9e4; border-radius:999px;
+  overflow:hidden; margin:8px 0 6px; }
+.progress > div { height:100%; background:#2a5747; border-radius:999px; }
+.progress-hint { font-size:12px; color:#6d7a72; margin-bottom:12px; }
 
-.badge { display:inline-block; padding:3px 10px; border-radius:20px;
-    font-size:12px; font-weight:600; }
-.badge-green  { background:#e8f4ef; color:#1b4332; }
-.badge-red    { background:#fef2f2; color:#b91c1c; }
-.badge-gray   { background:#f0efe9; color:#5a5850; }
-.badge-warn   { background:#fffbeb; color:#92400e; }
-.badge-blue   { background:#eff6ff; color:#1e40af; }
+/* ── Badges ──────────────────────────────────────────────── */
+.badge { display:inline-block; padding:3px 10px; border-radius:999px;
+  font-size:12px; font-weight:600; white-space:nowrap; }
+.badge-green { background:#e3f2ea; color:#186a43; }
+.badge-red   { background:#fbeae8; color:#a83a31; }
+.badge-gray  { background:#eef0ec; color:#5c6a62; }
+.badge-warn  { background:#fdf3dd; color:#8f5f0a; }
+.badge-blue  { background:#e7eefc; color:#2b5fb8; }
 
-.sec-title { font-size:13px; font-weight:600; color:#5a5850;
-    text-transform:uppercase; letter-spacing:.05em;
-    margin:20px 0 10px; border-bottom:1px solid #e2e0d8; padding-bottom:6px; }
+/* ── Caixas de destaque ──────────────────────────────────── */
+.info-box { background:#e7eefc; border:1px solid #cddcf7; border-radius:10px;
+  padding:12px 14px; font-size:13px; color:#2b5fb8; margin-bottom:14px; }
+.warn-box { background:#fdf3dd; border:1px solid #f0dfae; border-radius:10px;
+  padding:12px 14px; font-size:13px; color:#8f5f0a; margin-bottom:14px; }
+.draft-box { background:#fdf7e3; border:1.5px solid #e3c96b; border-radius:12px;
+  padding:16px; margin-bottom:16px; }
+.draft-box h4 { margin:0 0 6px; color:#6e4c0a; font-size:15px; }
+.draft-box p  { margin:0; font-size:13px; color:#8f5f0a; }
 
-.top-nav { display:flex; align-items:center; justify-content:space-between;
-    background:#1b4332; color:white; padding:12px 16px;
-    border-radius:10px; margin-bottom:20px; }
-.top-nav h3 { margin:0; font-size:16px; }
-.top-nav span { font-size:12px; opacity:.75; }
-
-.info-box  { background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px;
-    padding:12px 14px; font-size:13px; color:#1e40af; margin-bottom:14px; }
-.warn-box  { background:#fffbeb; border:1px solid #fde68a; border-radius:8px;
-    padding:12px 14px; font-size:13px; color:#92400e; margin-bottom:14px; }
-.draft-box { background:#fefce8; border:2px solid #facc15; border-radius:10px;
-    padding:16px; margin-bottom:16px; }
-.draft-box h4 { margin:0 0 6px; color:#78350f; font-size:15px; }
-.draft-box p  { margin:0; font-size:13px; color:#92400e; }
-
-/* Tabela HTML responsiva (substitui st.dataframe no mobile) */
-.table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; border-radius:8px; }
-table.tbl { width:100%; border-collapse:collapse; background:white;
-    font-size:13px; border:1px solid #e2e0d8; min-width:520px; }
-table.tbl th { background:#1b4332; color:white; padding:8px 10px; text-align:left;
-    font-size:12px; font-weight:600; }
-table.tbl td { padding:8px 10px; border-bottom:1px solid #eee9e0; }
+/* ── Tabela HTML responsiva (melhor que st.dataframe no celular) ── */
+.table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; border-radius:10px;
+  border:1px solid #e3e6e0; }
+table.tbl { width:100%; border-collapse:collapse; background:#fff;
+  font-size:13px; min-width:520px; }
+table.tbl th { background:#17332a; color:#fff; padding:9px 12px; text-align:left;
+  font-size:12px; font-weight:600; }
+table.tbl td { padding:9px 12px; border-bottom:1px solid #eef0ec; color:#1c2823; }
 table.tbl td.num, table.tbl th.num { text-align:right; }
-table.tbl tr:nth-child(even) td { background:#faf8f4; }
-table.tbl td.empty { text-align:center; color:#8a877e; padding:14px; }
+table.tbl tr:nth-child(even) td { background:#f8f9f6; }
+table.tbl td.empty { text-align:center; color:#6d7a72; padding:16px; }
 
+/* ── Widgets ─────────────────────────────────────────────── */
 #MainMenu, footer { visibility:hidden; }
-.stButton > button { width:100%; border-radius:8px !important;
-    padding:.55rem 1rem !important; font-size:14px !important; }
-.stTabs [data-baseweb="tab"] { font-size:13px; color:#374151; }
-.stTabs [data-baseweb="tab"][aria-selected="true"] { color:#1b4332; font-weight:700; }
+.stButton > button { border-radius:9px !important; padding:.5rem 1.1rem !important;
+  font-size:14px !important; font-weight:600 !important; }
+.stButton > button[kind="primary"] {
+  background:#2a5747 !important; border:none !important; color:#fff !important; }
+.stButton > button[kind="primary"]:hover { background:#22483a !important; }
+.stButton > button[kind="secondary"] {
+  background:#fff !important; color:#2a5747 !important; border:1px solid #d6dcd6 !important; }
+.stTextInput input, .stTextArea textarea, .stNumberInput input {
+  border-radius:9px !important; }
+.stTabs [data-baseweb="tab"] { font-size:13px; color:#5c6a62; }
+.stTabs [data-baseweb="tab"][aria-selected="true"] { color:#2a5747 !important; font-weight:700; }
+.stTabs [data-baseweb="tab-highlight"] { background-color:#2a5747 !important; }
 
-/* Mobile-first */
+/* ── Login ───────────────────────────────────────────────── */
+.login-wrap { display:flex; justify-content:center; padding-top:5vh; }
+.login-head { text-align:center; margin-bottom:6px; }
+.login-logo {
+  width:58px; height:58px; border-radius:16px; background:#17332a; color:#fff;
+  font-size:28px; display:flex; align-items:center; justify-content:center;
+  margin:0 auto 14px;
+}
+.login-head h2 { font-size:20px; font-weight:800; margin:0 0 4px; color:#1c2823; }
+.login-head p { font-size:13px; color:#6d7a72; margin:0 0 18px; }
+
+/* ── Mobile-first ────────────────────────────────────────── */
 @media (max-width: 640px) {
-  .block-container { padding:.6rem .6rem 3rem; }
-  .stat-card { min-width:calc(50% - 10px); padding:12px 8px; }
+  .block-container { padding:.8rem .8rem 3rem; }
+  .stat-card { min-width:calc(50% - 8px); padding:12px 10px; }
   .stat-card .lbl { font-size:10px; }
-  .stat-card .val { font-size:18px; }
-  .top-nav { padding:10px 12px; }
+  .stat-card .val { font-size:19px; }
+  .page-head h1 { font-size:19px; }
   table.tbl { font-size:12px; min-width:0; }
   table.tbl td, table.tbl th { padding:7px 8px; }
   .stTabs [data-baseweb="tab"] { font-size:12px; }
@@ -155,6 +227,10 @@ table.tbl td.empty { text-align:center; color:#8a877e; padding:14px; }
 
 
 # ─── HELPERS DE TELA ────────────────────────────────────────────────────────
+def sec(t: str) -> str:
+    return f'<div class="sec-title">{t}</div>'
+
+
 def render_table(headers, rows, right_align=(), empty="Nenhum dado.") -> str:
     """Tabela HTML responsiva — funciona bem no celular, ao contrário de st.dataframe."""
     thead = "".join(
@@ -170,8 +246,7 @@ def render_table(headers, rows, right_align=(), empty="Nenhum dado.") -> str:
     if not rows:
         body = f'<tr><td class="empty" colspan="{len(headers)}">{empty}</td></tr>'
     return (f'<div class="table-wrap"><table class="tbl">'
-            f"<thead><tr>{thead}</tr></thead>"
-            f"<tbody>{body}</tbody></table></div>")
+            f"<thead><tr>{thead}</tr></thead><tbody>{body}</tbody></table></div>")
 
 
 def cards(*itens):
@@ -182,17 +257,26 @@ def cards(*itens):
     st.markdown(html, unsafe_allow_html=True)
 
 
+def aluno_card(nome: str, sub: str, badge_html: str = "", ic: str = "",
+               inativo: bool = False) -> str:
+    cls = "aluno-card-inativo" if inativo else "aluno-card"
+    ncls = "aluno-nome-inativo" if inativo else "aluno-nome"
+    return (f'<div class="{cls}"><div class="aluno-top">'
+            f'<span class="{ncls}">{nome}{ic}</span>{badge_html}</div>'
+            f'<div class="aluno-sub">{sub}</div></div>')
+
+
 def wa_link(cel: str, msg: str) -> str:
     num = re.sub(r"\D", "", cel or "")
     return f"https://wa.me/55{num}?text={urllib.parse.quote(msg)}"
 
 
 def wa_icon(cel, msg, enabled: bool) -> str:
-    """Icone 📲 clicável de WhatsApp, colocado na frente do nome do aluno."""
+    """Ícone 📲 clicável de WhatsApp, colocado na frente do nome do aluno."""
     if not (enabled and cel):
         return ""
-    return (f'<a class="wa-ico" href="{wa_link(cel, msg)}" '
-            f'target="_blank" rel="noopener" title="Abrir WhatsApp">📲</a>')
+    return (f'<a class="wa-ico" href="{wa_link(cel, msg)}" target="_blank" '
+            f'title="Enviar lembrete no WhatsApp">📲</a>')
 
 
 # ─── ACESSO A DADOS ─────────────────────────────────────────────────────────
@@ -278,7 +362,7 @@ def notificar_tesoureiras(assunto: str, corpo: str):
     numeros = [n.strip() for n in _secrets_get("TESOUREIRAS_WA").split(",") if n.strip()]
     if not numeros:
         return False
-    return all(enviar_whatsapp(n, f"🎓 *{assunto}*\\n\\n{corpo}") for n in numeros)
+    return all(enviar_whatsapp(n, f"🎓 *{assunto}*\n\n{corpo}") for n in numeros)
 
 
 # ─── PDF ────────────────────────────────────────────────────────────────────
@@ -312,37 +396,37 @@ def gerar_pdf(ym, periodos, alunos, trans_rows) -> bytes:
         rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     styles = getSampleStyleSheet()
     H1 = ParagraphStyle("H1", parent=styles["Heading1"], fontSize=16,
-        textColor=colors.HexColor("#1b4332"), spaceAfter=4)
+        textColor=colors.HexColor("#17332a"), spaceAfter=4)
     H2 = ParagraphStyle("H2", parent=styles["Heading2"], fontSize=12,
-        textColor=colors.HexColor("#2d6a4f"), spaceBefore=14, spaceAfter=6)
+        textColor=colors.HexColor("#2a5747"), spaceBefore=14, spaceAfter=6)
     SUB = ParagraphStyle("SUB", parent=styles["Normal"], fontSize=9,
         textColor=colors.gray, spaceAfter=8)
 
     ts_base = TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f9fafb")),
-        ("GRID", (0, 0), (-1, -1), .5, colors.HexColor("#e2e0d8")),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8f9f6")),
+        ("GRID", (0, 0), (-1, -1), .5, colors.HexColor("#e3e6e0")),
         ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
         ("ALIGN", (1, 0), (1, -1), "RIGHT"),
         ("FONTSIZE", (0, 0), (-1, -1), 10),
     ])
     ts_al = TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1b4332")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17332a")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("GRID", (0, 0), (-1, -1), .5, colors.HexColor("#e2e0d8")),
+        ("GRID", (0, 0), (-1, -1), .5, colors.HexColor("#e3e6e0")),
         ("ALIGN", (3, 1), (3, -1), "RIGHT"),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fafb")]),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8f9f6")]),
     ])
     for i, r in enumerate(rows_ativos):
         if r[4] == "DEVEDOR":
-            ts_al.add("TEXTCOLOR", (3, i + 1), (4, i + 1), colors.HexColor("#b91c1c"))
+            ts_al.add("TEXTCOLOR", (3, i + 1), (4, i + 1), colors.HexColor("#b3372f"))
             ts_al.add("FONTNAME", (3, i + 1), (4, i + 1), "Helvetica-Bold")
 
     elems = [
         Paragraph(f"🎓 {CFG['nome_comissao']} — Fechamento {F.fmt_mes(ym)}", H1),
         Paragraph(f"Emitido em {hoje}  |  Referência: {F.fmt_mes(ym)}", SUB),
-        HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e2e0d8"), spaceAfter=10),
+        HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e3e6e0"), spaceAfter=10),
         Paragraph("Resumo financeiro", H2),
         Table([
         ["Total de mensalidades arrecadadas", F.fmt_brl(total_mensalidades)],
@@ -356,12 +440,12 @@ def gerar_pdf(ym, periodos, alunos, trans_rows) -> bytes:
 
     if rows_desist:
         ts_d = TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#5a5850")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#5c6a62")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("GRID", (0, 0), (-1, -1), .5, colors.HexColor("#e2e0d8")),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fafb")]),
+            ("GRID", (0, 0), (-1, -1), .5, colors.HexColor("#e3e6e0")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8f9f6")]),
         ])
         elems += [
             Spacer(1, 12),
@@ -404,24 +488,35 @@ def parse_csv(texto: str, alunos_ativos: list) -> list:
 
 # ─── LOGIN ──────────────────────────────────────────────────────────────────
 def tela_login():
-    st.markdown(f"""
-    <div style="text-align:center;padding:48px 0 24px">
-      <div style="font-size:52px">🎓</div>
-      <h2 style="margin:8px 0 4px;color:#1b4332">{CFG['nome_comissao']}</h2>
-      <p style="color:#8a877e;font-size:14px">Gestão Financeira da Comissão</p>
-    </div>
+    # Esconde a sidebar enquanto não há sessão aberta
+    st.markdown("""
+    <style>
+      [data-testid="stSidebar"],
+      [data-testid="stSidebarCollapsedControl"] { display:none; }
+    </style>
     """, unsafe_allow_html=True)
-    perfil = st.selectbox("Perfil de acesso", ["Tesouraria", "Consulta"])
-    senha = st.text_input("Senha", type="password")
-    if st.button("Entrar", type="primary"):
-        chave = "SENHA_TESOURARIA" if perfil == "Tesouraria" else "SENHA_CONSULTA"
-        esperada = _secrets_get(chave)
-        # No modo demonstração (sem secrets) qualquer senha entra — só p/ testar.
-        if senha == esperada or (_demo_ativo() and not esperada):
-            st.session_state["perfil"] = perfil
-            st.rerun()
-        else:
-            st.error("Senha incorreta")
+
+    _, meio, _ = st.columns([1, 1.1, 1])
+    with meio:
+        st.markdown(f"""
+        <div class="login-wrap"><div class="login-head">
+          <div class="login-logo">🎓</div>
+          <h2>{CFG['nome_comissao']}</h2>
+          <p>Gestão Financeira da Comissão</p>
+        </div></div>
+        """, unsafe_allow_html=True)
+
+        perfil = st.selectbox("Perfil de acesso", ["Tesouraria", "Consulta"])
+        senha = st.text_input("Senha", type="password")
+        if st.button("Entrar", type="primary", width="stretch"):
+            chave = "SENHA_TESOURARIA" if perfil == "Tesouraria" else "SENHA_CONSULTA"
+            esperada = _secrets_get(chave)
+            # No modo demonstração (sem secrets) qualquer senha entra — só p/ testar.
+            if senha == esperada or (_demo_ativo() and not esperada):
+                st.session_state["perfil"] = perfil
+                st.rerun()
+            else:
+                st.error("Senha incorreta")
 
 
 # ─── MAIN ───────────────────────────────────────────────────────────────────
@@ -432,17 +527,44 @@ if "perfil" not in st.session_state:
 perfil = st.session_state["perfil"]
 is_admin = perfil == "Tesouraria"
 
-if _demo_ativo():
-    st.caption("⚙️ *Modo demonstração* (sem Supabase configurado). Os dados são fictícios.")
+SECOES = ["Visão geral", "Mês corrente", "Situação dos alunos",
+          "Extrato", "Fechamentos", "Cadastros"]
 
-garantir_draft_mes_anterior()
+# ─── Sidebar: logo + navegação + sessão ─────────────────────────────────────
+with st.sidebar:
+    st.markdown(f"""
+    <div class="sb-logo">
+      <div class="sb-logo-ico">🎓</div>
+      <div>
+        <div class="sb-name">{CFG['nome_curto']}</div>
+        <div class="sb-sub">Gestão financeira</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
+    secao = st.radio("Navegação", SECOES, label_visibility="collapsed", key="nav")
+
+    st.markdown(f"""
+    <span class="badge {'badge-green' if is_admin else 'badge-blue'}"
+          style="margin-top:16px">{'🔑 Tesouraria' if is_admin else '👁 Consulta'}</span>
+    """, unsafe_allow_html=True)
+    if _demo_ativo():
+        st.markdown('<span class="sb-badge">Ambiente de demonstração</span>',
+                    unsafe_allow_html=True)
+    if st.button("Sair"):
+        del st.session_state["perfil"]
+        st.rerun()
+
+# ─── Cabeçalho da área principal ────────────────────────────────────────────
 st.markdown(f"""
-<div class="top-nav">
-  <h3>🎓 {CFG['nome_curto']}</h3>
-  <span>{'🔑 Tesouraria' if is_admin else '👁 Consulta'}</span>
+<div class="page-head">
+  <h1>{secao}</h1>
+  <span class="badge {'badge-green' if is_admin else 'badge-blue'}">
+    {'🔑 Tesouraria' if is_admin else '👁 Consulta'}</span>
 </div>
 """, unsafe_allow_html=True)
+
+garantir_draft_mes_anterior()
 
 # Banner de draft pendente (para admin)
 if is_admin:
@@ -452,29 +574,22 @@ if is_admin:
         st.markdown(f"""
         <div class="draft-box">
           <h4>⚠️ Fechamento de {F.fmt_mes(mes_anterior)} aguarda confirmação</h4>
-          <p>Revise a situação dos alunos e confirme o fechamento na aba 📄 Fechamento.</p>
+          <p>Revise a situação dos alunos e confirme o fechamento na seção Fechamentos.</p>
         </div>
         """, unsafe_allow_html=True)
 
-if st.button("Sair", type="secondary"):
-    del st.session_state["perfil"]
-    st.rerun()
-
-tabs = st.tabs(["📊 Visão geral", "📋 Mês corrente", "📊 Situação fechada",
-                "📥 Extrato", "📄 Fechamento", "⚙️ Cadastros"])
-
-# Dados carregados uma vez por execução (evita recarregar a cada aba)
+# Dados carregados uma vez por execução (evita recarregar a cada seção)
 periodos = get_periodos()
 alunos = get_alunos()
 
 
-# ─── ABA 0 — VISÃO GERAL (painel de caixa) ─────────────────────────────────
-with tabs[0]:
+# ─── SEÇÃO 0 — VISÃO GERAL (painel de caixa) ────────────────────────────────
+if secao == "Visão geral":
     ate_ym = get_ultimo_mes_fechado() or F.current_ym()
     trans_rows = get_transacoes()
     p = F.calcular_painel(trans_rows, periodos, alunos, ate_ym)
 
-    st.markdown(f'<div class="sec-title">Caixa consolidado</div>', unsafe_allow_html=True)
+    st.markdown(sec("Caixa consolidado"), unsafe_allow_html=True)
     cards(
         ("Saldo total", F.fmt_brl(p["patrimonio"]), "green"),
         ("Mensalidades arrecadadas", F.fmt_brl(p["total_mensalidades"]), "blue"),
@@ -482,13 +597,12 @@ with tabs[0]:
         ("Rendimento acumulado", F.fmt_brl(p["rendimento"]), "orange"),
     )
     st.markdown(
-        f'<div class="info-box">Situação de caixa até <b>{F.fmt_mes(ate_ym)}</b>. '
+        f'<div class="page-sub">Situação de caixa até {F.fmt_mes(ate_ym)}. '
         f'O "saldo total" considera conta corrente + investimento.</div>',
         unsafe_allow_html=True)
 
     # Saldo conta vs investimento
-    st.markdown('<div class="sec-title">Conta corrente × Investimento</div>',
-                unsafe_allow_html=True)
+    st.markdown(sec("Conta corrente × Investimento"), unsafe_allow_html=True)
     cards(
         ("Em conta corrente", F.fmt_brl(p["saldo_conta"]), "blue"),
         ("Aplicado no investimento", F.fmt_brl(p["saldo_invest"]), "orange"),
@@ -497,7 +611,7 @@ with tabs[0]:
     )
 
     # Arrecadação por ano (meta x atingido)
-    st.markdown('<div class="sec-title">Arrecadação por ano</div>', unsafe_allow_html=True)
+    st.markdown(sec("Arrecadação por ano"), unsafe_allow_html=True)
     rows = []
     for ano, pago in p["arrecadacao_por_ano"].items():
         meta = p["meta_ano"].get(ano, 0.0)
@@ -505,7 +619,7 @@ with tabs[0]:
         cls = "green" if pct >= 100 else ("orange" if pct >= 70 else "red")
         rows.append([
             ano, F.fmt_brl(pago), F.fmt_brl(meta),
-            f'<span class="badge badge-{"green" if cls=="green" else "warn" if cls=="orange" else "red"}">{pct:.0f}%</span>'
+            f'<span class="{cls}" style="font-weight:700">{pct:.0f}%</span>'
         ])
     st.markdown(render_table(
         ["Ano", "Pago", "Meta", "Atingido"], rows,
@@ -514,9 +628,10 @@ with tabs[0]:
     # Orçamento/previsão (se houver tabela)
     itens = get_orcamento()
     if itens:
-        st.markdown('<div class="sec-title">Previsão de orçamento</div>', unsafe_allow_html=True)
+        st.markdown(sec("Previsão de orçamento"), unsafe_allow_html=True)
         rows = [[i["descricao"], i["data"], F.fmt_brl(i["valor"])] for i in itens]
-        rows.append(["<b>Total</b>", "", f"<b>{F.fmt_brl(F.total_orcamento(itens))}</b>"])
+        rows.append(["<strong>Total</strong>", "",
+                     f"<strong>{F.fmt_brl(F.total_orcamento(itens))}</strong>"])
         st.markdown(render_table(["Item", "Quando", "Valor"], rows,
                                  right_align=(2,)), unsafe_allow_html=True)
 
@@ -525,18 +640,14 @@ with tabs[0]:
                "Confira com o extrato — as contas vivem centralizadas em `financeiro.py`.")
 
 
-# ─── ABA 1 — MÊS CORRENTE (prévia) ─────────────────────────────────────────
-with tabs[1]:
+# ─── SEÇÃO 1 — MÊS CORRENTE (prévia) ────────────────────────────────────────
+elif secao == "Mês corrente":
     hoje_ym = F.current_ym()
     ativos = [a for a in alunos if a["status"] == "Ativo"]
 
-    st.markdown(f'<div class="sec-title">Prévia — {F.fmt_mes(hoje_ym)}</div>',
-                unsafe_allow_html=True)
     st.markdown("""
-    <div class="info-box">
-    Esta é uma <b>prévia</b>. Os pais têm o mês inteiro para pagar.
-    Ninguém é considerado devedor aqui — isso só acontece após o fechamento do mês.
-    </div>
+    <div class="info-box">Esta é uma prévia. Os pais têm o mês inteiro para pagar.
+    Ninguém é considerado devedor aqui — isso só acontece após o fechamento do mês.</div>
     """, unsafe_allow_html=True)
 
     pagantes = quem_pagou_no_mes(hoje_ym)  # uma query, não uma por aluno
@@ -557,48 +668,42 @@ with tabs[1]:
             unsafe_allow_html=True)
 
     if nao_pagaram:
-        st.markdown("**Ainda não pagaram este mês (lembrete):**")
+        st.markdown(sec("Ainda não pagaram este mês (lembrete)"), unsafe_allow_html=True)
         for a in nao_pagaram:
             msg = (f"Olá! Passando para lembrar da mensalidade de {F.fmt_mes(hoje_ym)} "
                    f"da Formatura. 🎓")
             ic = wa_icon(a.get("celular"), msg, is_admin)
-            st.markdown(f"""
-            <div class="aluno-card">
-              <div class="aluno-nome">{a['nome']}{ic}</div>
-              <div class="aluno-sub">ID {a['id']} · Turma {a['turma']}</div>
-              <span class="badge badge-warn">⏳ Pagar até 30/{hoje_ym[5:7]}</span>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(aluno_card(
+                a["nome"], f"ID {a['id']} · Turma {a['turma']}",
+                badge_html=f'<span class="badge badge-warn">⏳ Pagar até 30/{hoje_ym[5:7]}</span>',
+                ic=ic), unsafe_allow_html=True)
 
     if pagaram:
-        st.markdown("**Já pagaram:**")
+        st.markdown(sec("Já pagaram"), unsafe_allow_html=True)
         for a in pagaram:
-            st.markdown(f"""
-            <div class="aluno-card">
-              <div class="aluno-nome">{a['nome']}</div>
-              <div class="aluno-sub">ID {a['id']} · Turma {a['turma']}</div>
-              <span class="badge badge-green">✓ Pago em {F.fmt_mes(hoje_ym)}</span>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(aluno_card(
+                a["nome"], f"ID {a['id']} · Turma {a['turma']}",
+                badge_html=f'<span class="badge badge-green">✓ Pago em {F.fmt_mes(hoje_ym)}</span>'),
+                unsafe_allow_html=True)
 
 
-# ─── ABA 2 — SITUAÇÃO FECHADA ──────────────────────────────────────────────
-with tabs[2]:
+# ─── SEÇÃO 2 — SITUAÇÃO DOS ALUNOS (fechada) ────────────────────────────────
+elif secao == "Situação dos alunos":
     ultimo_fechado = get_ultimo_mes_fechado()
     trans_rows = get_transacoes()
     trans = F.carregar_transacoes_agrupadas(trans_rows)
 
     if not ultimo_fechado:
-        st.markdown('<div class="warn-box">Nenhum mês fechado ainda. '
-                    'Confirme um fechamento na aba 📄 Fechamento.</div>', unsafe_allow_html=True)
-    else:
-        st.markdown(f'<div class="sec-title">Situação — até {F.fmt_mes(ultimo_fechado)}</div>',
+        st.markdown('<div class="info-box">Nenhum mês fechado ainda. '
+                    'Confirme um fechamento na seção Fechamentos.</div>',
                     unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div class="page-sub">Situação fechada — até '
+                    f'{F.fmt_mes(ultimo_fechado)}.</div>', unsafe_allow_html=True)
         st.markdown(
-            '<div class="info-box"><b>Devedor</b> = quem está com algum <b>mês já '
-            'fechado</b> em aberto (até ' + F.fmt_mes(ultimo_fechado)
-            + '). Quem pagou em dia até o último fechamento não deve. '
-            'A janela em aberto aparece na aba 📋 Mês corrente.</div>',
+            '<div class="info-box">Devedor = quem está com algum mês já fechado em aberto '
+            '(até ' + F.fmt_mes(ultimo_fechado) + '). Quem pagou em dia até o último '
+            'fechamento não deve. A janela em aberto aparece na seção Mês corrente.</div>',
             unsafe_allow_html=True)
 
         ativos = [a for a in alunos if a["status"] == "Ativo"]
@@ -633,12 +738,12 @@ with tabs[2]:
                 continue
             if filtro == "Só em dia" and saldo < 0:
                 continue
-            detalhe = f"Pago: {F.fmt_brl(calc['total_pago'])} | Meta: {F.fmt_brl(calc['meta'])}"
+            detalhe = f"ID {a['id']} · Turma {a['turma']} · Pago: {F.fmt_brl(calc['total_pago'])} | Meta: {F.fmt_brl(calc['meta'])}"
             if saldo >= 0:
-                adiant_str = (f' <span class="badge badge-warn">'
-                              f'{calc["adiantados"]} {"mês" if calc["adiantados"]==1 else "meses"} adiant.</span>'
+                adiant_str = (f' · {calc["adiantados"]} '
+                              f'{"mês" if calc["adiantados"]==1 else "meses"} adiant.'
                               if calc["adiantados"] > 0 else "")
-                badge = f'<span class="badge badge-green">Em dia</span>{adiant_str}'
+                badge = f'<span class="badge badge-green">Em dia{adiant_str}</span>'
                 ic = ""
             else:
                 badge = f'<span class="badge badge-red">Deve {F.fmt_brl(abs(saldo))}</span>'
@@ -646,34 +751,26 @@ with tabs[2]:
                        f"já fechados da Formatura. Podemos confirmar o pagamento? 🎓")
                 ic = wa_icon(a.get("celular"), msg, is_admin)
 
-            st.markdown(f"""
-            <div class="aluno-card">
-              <div class="aluno-nome">{a['nome']}{ic}</div>
-              <div class="aluno-sub">ID {a['id']} · Turma {a['turma']} · {detalhe}</div>
-              {badge}
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(aluno_card(a["nome"], detalhe, badge_html=badge, ic=ic),
+                        unsafe_allow_html=True)
 
         if inativos and filtro == "Todos":
-            st.markdown('<div class="sec-title">Desistentes</div>', unsafe_allow_html=True)
+            st.markdown(sec("Desistentes"), unsafe_allow_html=True)
             for a in inativos:
                 calc = F.calcular_aluno(a, periodos, trans, ultimo_fechado)
-                dev_badge = (f'<span class="badge badge-warn">Devolução pendente {F.fmt_brl(calc["dev_pendente"])}</span>'
+                dev_badge = (f'<span class="badge badge-warn">Devolução pendente '
+                             f'{F.fmt_brl(calc["dev_pendente"])}</span>'
                              if calc["dev_pendente"] > 0.01
                              else '<span class="badge badge-gray">Devolução concluída</span>')
-                detalhe = (f"Total pago: {F.fmt_brl(calc['total_pago'])} | "
-                           f"Devolvido: {F.fmt_brl(calc['devolucao'])}")
-                st.markdown(f"""
-                <div class="aluno-card-inativo">
-                  <div class="aluno-nome-inativo">⏹ {a['nome']}</div>
-                  <div class="aluno-sub">ID {a['id']} · Turma {a['turma']} · {detalhe}</div>
-                  {dev_badge}
-                </div>
-                """, unsafe_allow_html=True)
+                detalhe = (f"ID {a['id']} · Turma {a['turma']} · Total pago: "
+                           f"{F.fmt_brl(calc['total_pago'])} | Devolvido: {F.fmt_brl(calc['devolucao'])}")
+                st.markdown(aluno_card(a["nome"], detalhe, badge_html=dev_badge,
+                                       ic="⏹ ", inativo=True),
+                            unsafe_allow_html=True)
 
 
-# ─── ABA 3 — EXTRATO / IMPORTAÇÃO ──────────────────────────────────────────
-with tabs[3]:
+# ─── SEÇÃO 3 — EXTRATO / IMPORTAÇÃO ────────────────────────────────────────
+elif secao == "Extrato":
     if not is_admin:
         st.markdown('<div class="info-box">🔒 Disponível apenas para Tesouraria.</div>',
                     unsafe_allow_html=True)
@@ -683,17 +780,14 @@ with tabs[3]:
 
     with sub_import:
         st.markdown("""
-        <div class="info-box">
-        Cole o extrato do banco. Formato: <b>DD/MM/AAAA, Descrição, Valor</b>
-        (vírgula ou ponto-e-vírgula). Valores negativos = saídas.
-        A primeira linha pode ser cabeçalho.
-        </div>
+        <div class="info-box">Cole o extrato do banco. Formato: <strong>DD/MM/AAAA; Descrição; Valor</strong>
+        (vírgula ou ponto-e-vírgula). Valores negativos = saídas. A primeira linha pode ser cabeçalho.</div>
         """, unsafe_allow_html=True)
 
         csv_texto = st.text_area("Extrato (CSV)", height=160,
             placeholder="14/04/2025,PIX TRANSF MARGARE14/04,200.00\n15/04/2025,INT APLICACAO PRIVILEGE,-3000.00")
 
-        if st.button("🔍 Analisar extrato", type="primary"):
+        if st.button("Analisar extrato", type="primary"):
             if not csv_texto.strip():
                 st.warning("Cole o extrato antes de analisar.")
             else:
@@ -718,8 +812,7 @@ with tabs[3]:
             if nao_id:
                 alunos_opts = db().table("alunos").select("id,nome").eq("status", "Ativo").execute().data
                 opts_map = {a["nome"]: a["id"] for a in alunos_opts}
-                st.markdown('<div class="sec-title">Identificar manualmente</div>',
-                            unsafe_allow_html=True)
+                st.markdown(sec("Identificar manualmente"), unsafe_allow_html=True)
                 for l in nao_id:
                     gi = linhas.index(l)
                     st.markdown(f"**{l['data']}** · {l['descricao']} · `{F.fmt_brl(l['valor'])}`")
@@ -735,7 +828,7 @@ with tabs[3]:
                             "aluno_id": opts_map[escolha], "aluno_nome": escolha,
                             "categoria": "MENSALIDADE" if l["valor"] > 0 else "DEVOLUCAO"})
 
-            st.markdown('<div class="sec-title">Prévia</div>', unsafe_allow_html=True)
+            st.markdown(sec("Prévia"), unsafe_allow_html=True)
             st.dataframe(pd.DataFrame([{
                 "Data": l["data"], "Descrição": l["descricao"][:42],
                 "Valor": F.fmt_brl(l["valor"]), "Aluno": l["aluno_nome"] or "—",
@@ -743,7 +836,7 @@ with tabs[3]:
             } for l in linhas]), width="stretch", hide_index=True)
 
             c1, c2 = st.columns(2)
-            if c1.button("✓ Confirmar importação", type="primary"):
+            if c1.button("Confirmar importação", type="primary"):
                 with st.spinner("Salvando..."):
                     db().table("transacoes").insert([{
                         "data": l["data"], "descricao": l["descricao"],
@@ -775,10 +868,8 @@ with tabs[3]:
 
     with sub_editar:
         st.markdown("""
-        <div class="warn-box">
-        Correção de lançamentos: se uma importação errou o aluno/categoria/valor,
-        escolha a transação abaixo e ajuste ou **exclua**.
-        </div>
+        <div class="info-box">Correção de lançamentos: se uma importação errou o aluno/categoria/valor,
+        escolha a transação abaixo e ajuste ou <strong>exclua</strong>.</div>
         """, unsafe_allow_html=True)
         # Alvos mais recentes (últimas 300)
         alvo = db().table("transacoes").select(
@@ -813,7 +904,7 @@ with tabs[3]:
                 key="ed_aluno")
 
             c3, c4 = st.columns(2)
-            if c3.button("💾 Salvar alterações", type="primary"):
+            if c3.button("Salvar alterações", type="primary"):
                 novo_id = None if novo_aluno.startswith("—") else novo_aluno.split(" · ")[0]
                 db().table("transacoes").update({
                     "data": nova_data, "descricao": novo_desc, "valor": novo_valor,
@@ -821,7 +912,7 @@ with tabs[3]:
                 }).eq("id", t["id"]).execute()
                 st.success("✓ Transação corrigida!")
                 st.rerun()
-            if c4.button("🗑 Excluir transação"):
+            if c4.button("Excluir transação"):
                 st.session_state[f"del_{t['id']}"] = True
             if st.session_state.get(f"del_{t['id']}"):
                 st.warning(f"Excluir **{t['descricao']}** de {t['data']}? Isso não pode ser desfeito.")
@@ -835,8 +926,8 @@ with tabs[3]:
                     st.rerun()
 
 
-# ─── ABA 4 — FECHAMENTO ────────────────────────────────────────────────────
-with tabs[4]:
+# ─── SEÇÃO 4 — FECHAMENTOS ─────────────────────────────────────────────────
+elif secao == "Fechamentos":
     trans_rows = get_transacoes()
     trans = F.carregar_transacoes_agrupadas(trans_rows)
 
@@ -870,7 +961,7 @@ with tabs[4]:
                     unsafe_allow_html=True)
 
         if is_admin:
-            if st.button(f"✅ Confirmar fechamento de {F.fmt_mes(mes_anterior)}", type="primary"):
+            if st.button(f"Confirmar fechamento de {F.fmt_mes(mes_anterior)}", type="primary"):
                 with st.spinner("Confirmando e notificando..."):
                     confirmar_fechamento(mes_anterior, perfil)
                     devedores = [r for r in rows_prev if r[4].startswith("🔴")]
@@ -886,7 +977,7 @@ with tabs[4]:
                         st.warning("WhatsApp não enviado — verifique WA_TOKEN e WA_PHONE_ID nos secrets.")
                 st.rerun()
 
-    st.markdown('<div class="sec-title">Histórico de fechamentos</div>', unsafe_allow_html=True)
+    st.markdown(sec("Histórico de fechamentos"), unsafe_allow_html=True)
     fechs = db().table("fechamentos").select("*").order("ano_mes", desc=True).execute().data
     if not fechs:
         st.info("Nenhum fechamento registrado.")
@@ -900,7 +991,7 @@ with tabs[4]:
                 st.markdown(f"**Criado em:** {criado}  |  "
                     f"**Confirmado em:** {conf}  |  **Por:** {by}")
                 if f["status"] == "confirmado" and is_admin:
-                    if st.button(f"📥 Baixar PDF {F.fmt_mes(f['ano_mes'])}",
+                    if st.button(f"Baixar PDF {F.fmt_mes(f['ano_mes'])}",
                                  key=f"pdf_{f['ano_mes']}"):
                         with st.spinner("Gerando PDF..."):
                             pdf = gerar_pdf(f["ano_mes"], periodos, alunos, trans_rows)
@@ -910,8 +1001,8 @@ with tabs[4]:
                             mime="application/pdf", key=f"dl_{f['ano_mes']}")
 
 
-# ─── ABA 5 — CADASTROS ──────────────────────────────────────────────────────
-with tabs[5]:
+# ─── SEÇÃO 5 — CADASTROS ────────────────────────────────────────────────────
+elif secao == "Cadastros":
     if not is_admin:
         st.markdown('<div class="info-box">🔒 Disponível apenas para Tesouraria.</div>',
                     unsafe_allow_html=True)
@@ -996,10 +1087,8 @@ with tabs[5]:
 
     with sub3:
         st.markdown("""
-        <div class="info-box">
-        Cada período define o valor mensal a partir de uma data (AAAA-MM).
-        O sistema acumula automaticamente conforme os meses passam.
-        </div>
+        <div class="info-box">Cada período define o valor mensal a partir de uma data (AAAA-MM).
+        O sistema acumula automaticamente conforme os meses passam.</div>
         """, unsafe_allow_html=True)
         updated = []
         for i, (de, val) in enumerate(periodos):
@@ -1016,10 +1105,8 @@ with tabs[5]:
 
     with sub4:
         st.markdown("""
-        <div class="info-box">
-        Previsão de caixa do evento (abertura, mensalidades por ano, encerramento...).
-        O total aparece na aba 📊 Visão geral.
-        </div>
+        <div class="info-box">Previsão de caixa do evento (abertura, mensalidades por ano,
+        encerramento...). O total aparece na seção Visão geral.</div>
         """, unsafe_allow_html=True)
         itens = get_orcamento()
         for i in itens:
