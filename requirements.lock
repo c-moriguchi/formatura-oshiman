@@ -1,0 +1,10 @@
+# Lock: versões EXATAS que rodam em produção.
+# Pode instalar com:  pip install -r requirements.lock
+# Para atualizar de propósito: instale a nova versão no seu venv, rode `pip freeze`
+# filtrando estes 5 pacotes e atualize este arquivo. (dependências transitivas seguem)
+
+streamlit==1.63.0
+supabase==2.31.0
+pandas==2.3.3
+reportlab==5.0.1
+requests==2.34.2

@@ -1,5 +1,10 @@
-streamlit>=1.35.0
-supabase>=2.4.0
-pandas>=2.0.0
-reportlab>=4.0.0
-requests>=2.31.0
+# Dependências com TETO DE MAJOR (versões >= x e < próxima major):
+# - fica estável (não pula para uma versão que pode quebrar a API)
+# - continua recebendo correções da linha atual
+# Para o deploy, use as versões EXATAS do requirements.lock.
+
+streamlit>=1.35,<2
+supabase>=2.4,<3
+pandas>=2.0,<3
+reportlab>=4,<6
+requests>=2.31,<3
