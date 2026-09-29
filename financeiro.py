@@ -376,6 +376,12 @@ def resumo_despesas(itens) -> dict:
 
 
 # ─── MATCHING / IMPORTAÇÃO ─────────────────────────────────────────────────
+def emails_lista(aluno) -> list:
+    """Contas de acesso (emails) vinculadas a um aluno, limpas e minúsculas."""
+    return [e.strip().lower() for e in (aluno.get("emails_acesso") or "").split(",")
+            if e.strip()]
+
+
 def match_aluno(descricao: str, alunos_ativos: list):
     up = descricao.upper()
     for a in alunos_ativos:

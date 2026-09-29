@@ -308,3 +308,9 @@ def test_investimento_rendimento_saldo_menos_aportes():
     assert iv["rendimento"] == 0.0
     # saldo 3555 -> rendimento 55
     assert F.investimento_resumo(trans, saldo_informado=3555.0)["rendimento"] == 55.0
+
+
+def test_emails_lista():
+    assert F.emails_lista({"emails_acesso": "A@X.com, b @y.com, , c@z"}) == ["a@x.com", "b @y.com", "c@z"]
+    assert F.emails_lista({}) == []
+    assert F.emails_lista({"emails_acesso": None}) == []

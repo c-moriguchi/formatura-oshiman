@@ -66,8 +66,13 @@ def _gera_dados():
     for id_, n, t, data_des, pago, dev in _INATIVOS:
         alunos.append({"id": id_, "nome": n, "celular": "11 900000000",
                        "termos_pix": t, "turma": "A", "status": "Inativo",
-                       "data_desistencia": data_des})
+                       "data_desistencia": data_des,
+                       "emails_acesso": "breno.desi@x.com" if id_ == "03A" else "",
+                       "acesso_revogado": False})
     data["alunos"] = alunos
+
+    # contas de acesso (para teste de revogação)
+    data["perfis"] = [{"email": "breno.desi@x.com", "perfil": "Consulta", "nome": "Breno"}]
 
     # transacoes sintéticas
     trans = []

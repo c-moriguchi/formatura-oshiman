@@ -15,6 +15,8 @@ create table if not exists public.alunos (
   turma text,
   status text not null default 'Ativo',      -- 'Ativo' | 'Inativo'
   data_desistencia text,            -- texto por compatibilidade com o app
+  emails_acesso text,               -- CONTAS do app desta família (vírgula); revogadas na devolução
+  acesso_revogado boolean not null default false,  -- marca que o acesso já foi revogado
   criado_em timestamptz not null default now()
 );
 

@@ -59,7 +59,8 @@ O login em produção usa **conta própria por pessoa** (email + senha) via Supa
      ('consulta@email.com',   'Consulta',   'João Souza');
    ```
    Sem essa linha, a pessoa não consegue entrar. O `nome` aparece na sidebar (se vazio, mostra o email). Para tirar o acesso de alguém, remova o usuário no **Authentication → Users** (ou apague a linha de `perfis`).
-4. No modo demonstração (sem Supabase) o app cai no login de senha única dos secrets — é só para testar, não é usado em produção.
+4. **Acesso por aluno/família (opcional):** no **Cadastros → Alunos**, o campo **"Emails de acesso"** vincula contas do app a uma família. Quando o app detecta uma **devolução** de um **desistente**, ele **revoga automaticamente** essas contas (remove de `perfis` — o login fica bloqueado; reversível re-adicionando). Em "Cadastros → Desistentes" dá pra revogar manualmente e ver o status.
+5. No modo demonstração (sem Supabase) o app cai no login de senha única dos secrets — é só para testar, não é usado em produção.
 
 #### "Esqueci minha senha" (self-service, sem reset manual)
 O app já tem o link no login. Para o email de recuperação voltar ao app, configure em **Authentication → Settings**:

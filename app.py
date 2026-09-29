@@ -462,6 +462,41 @@ def guardar_saldo_invest(saldo: float):
         {"id": 1, "saldo_informado": saldo}).execute()
 
 
+def revogar_acessos(aluno_ids) -> int:
+    """Revoga o login no app das contas vinculadas aos alunos (desistentes).
+
+    Remove os emails de `perfis` -> o Supabase Auth continua funcionando, mas o app
+    bloqueia o login (não há papel). REVERSÍVEL: basta re-adicionar em `perfis`.
+    Retorna quantas contas (emails) foram revogadas.
+    """
+    ids = [x for x in set(aluno_ids or []) if x]
+    if not ids:
+        return 0
+    removidos = 0
+    try:
+        alvos = db().table("alunos").select(
+            "id,status,emails_acesso").in_("id", ids).execute().data
+        for a in alvos:
+            if a["status"] != "Inativo":
+                continue  # só revoga acesso quando a devolução é de desistente
+            emails = F.emails_lista(a)
+            for em in emails:
+                try:
+                    db().table("perfis").delete().eq("email", em).execute()
+                    removidos += 1
+                except Exception:
+                    pass
+            if emails:
+                try:
+                    db().table("alunos").update(
+                        {"acesso_revogado": True}).eq("id", a["id"]).execute()
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return removidos
+
+
 def codificar_nota(upload) -> tuple | None:
     """Retorna (b64, nome, tipo) do arquivo de nota, ou None."""
     if upload is None:
@@ -1105,8 +1140,15 @@ elif secao == "Extrato":
                         "valor": l["valor"], "categoria": l["categoria"],
                         "aluno_id": l["aluno_id"], "observacao": ""
                     } for l in linhas]).execute()
+                    # Devoluções de desistentes -> revoga o acesso no app (automático)
+                    devol_ids = {l["aluno_id"] for l in linhas
+                                 if l["categoria"] == "DEVOLUCAO" and l["aluno_id"]}
+                    revogados = revogar_acessos(list(devol_ids))
                 del st.session_state["pending"]
-                st.success(f"✓ {len(linhas)} transações salvas!")
+                msg = f"✓ {len(linhas)} transações salvas!"
+                if revogados:
+                    msg += f" · 🔒 acesso de {revogados} conta(s) revogado (desistência)."
+                st.success(msg)
                 st.rerun()
             if c2.button("Cancelar"):
                 del st.session_state["pending"]
@@ -1390,10 +1432,14 @@ elif secao == "Cadastros":
                 cel = c2.text_input("Celular", value=a["celular"] or "", key=f"c_{a['id']}")
                 termos = st.text_input("Apelidos PIX (vírgula)",
                     value=a["termos_pix"] or "", key=f"p_{a['id']}")
+                emails = st.text_input("Emails de acesso (vírgula)",
+                    value=(a.get("emails_acesso") or ""), key=f"e_{a['id']}",
+                    help="Contas do app desta família. Revogadas automaticamente se houver devolução.")
                 c3, c4 = st.columns(2)
                 if c3.button("Salvar", key=f"sv_{a['id']}"):
                     db().table("alunos").update({
-                        "nome": nome, "celular": cel, "termos_pix": termos.upper()
+                        "nome": nome, "celular": cel, "termos_pix": termos.upper(),
+                        "emails_acesso": ",".join(x.strip() for x in emails.split(",") if x.strip())
                     }).eq("id", a["id"]).execute()
                     st.success("Salvo!"); st.rerun()
                 if c4.button("⚠️ Registrar desistência", key=f"d_{a['id']}"):
@@ -1415,12 +1461,14 @@ elif secao == "Cadastros":
         n_turma = c3.text_input("Turma (A/B)")
         n_cel = st.text_input("Celular WhatsApp")
         n_pix = st.text_input("Apelidos PIX (vírgula)")
+        n_ema = st.text_input("Emails de acesso (vírgula, opcional)")
         if st.button("Adicionar aluno", type="primary"):
             if n_id and n_nome:
                 try:
                     db().table("alunos").insert({
                         "id": n_id, "nome": n_nome, "status": "Ativo",
-                        "turma": n_turma, "celular": n_cel, "termos_pix": n_pix.upper()
+                        "turma": n_turma, "celular": n_cel, "termos_pix": n_pix.upper(),
+                        "emails_acesso": ",".join(x.strip() for x in n_ema.split(",") if x.strip())
                     }).execute()
                     st.success("Aluno adicionado!"); st.rerun()
                 except Exception as e:
@@ -1450,6 +1498,22 @@ elif secao == "Cadastros":
                         st.markdown(render_table(["Data", "Descrição", "Valor", "Categoria"],
                                                 rows_t, right_align=(2,)),
                                     unsafe_allow_html=True)
+
+                    # Acesso no app (revogado automaticamente na devolução)
+                    emails = F.emails_lista(a)
+                    ja_revogado = bool(a.get("acesso_revogado"))
+                    if emails:
+                        st.markdown(f"**Contas de acesso:** "
+                                    f"{', '.join(esc(e) for e in emails)}")
+                        if ja_revogado:
+                            st.caption("🔒 Acesso já revogado na devolução.")
+                        else:
+                            if st.button("🔒 Revogar acesso", key=f"rev_{a['id']}"):
+                                n = revogar_acessos([a["id"]])
+                                st.success(f"✓ {n} conta(s) revogada(s)")
+                                st.rerun()
+                    elif ja_revogado:
+                        st.caption("🔒 Acesso revogado.")
 
                     if st.button("↩️ Reativar", key=f"r_{a['id']}"):
                         db().table("alunos").update({
