@@ -54,11 +54,11 @@ O login em produção usa **conta própria por pessoa** (email + senha) via Supa
 2. **Authentication → Users → "Add user"** → crie uma conta com o email + senha de cada tesoureira.
 3. No **SQL Editor**, crie a tabela `perfis` (já está no `schema.sql`) e atribua o papel de cada email:
    ```sql
-   insert into public.perfis (email, perfil) values
-     ('tesoureira@email.com', 'Tesouraria'),
-     ('consulta@email.com',   'Consulta');
+   insert into public.perfis (email, perfil, nome) values
+     ('tesoureira@email.com', 'Tesouraria', 'Maria Silva'),
+     ('consulta@email.com',   'Consulta',   'João Souza');
    ```
-   Sem essa linha, a pessoa não consegue entrar. Para tirar o acesso de alguém, remova o usuário no **Authentication → Users** (ou apague a linha de `perfis`).
+   Sem essa linha, a pessoa não consegue entrar. O `nome` aparece na sidebar (se vazio, mostra o email). Para tirar o acesso de alguém, remova o usuário no **Authentication → Users** (ou apague a linha de `perfis`).
 4. No modo demonstração (sem Supabase) o app cai no login de senha única dos secrets — é só para testar, não é usado em produção.
 
 #### "Esqueci minha senha" (self-service, sem reset manual)

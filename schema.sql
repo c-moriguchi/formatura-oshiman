@@ -65,13 +65,16 @@ create table if not exists public.orcamento (
 -- a pessoa não consegue entrar (o app bloqueia).
 create table if not exists public.perfis (
   email text primary key,
-  perfil text not null check (perfil in ('Tesouraria', 'Consulta'))
+  perfil text not null check (perfil in ('Tesouraria', 'Consulta')),
+  nome text                        -- nome exibido na sidebar (opcional)
 );
 
--- Exemplo de como atribuir papel:
--- insert into public.perfis (email, perfil) values
---   ('tesoureira@email.com', 'Tesouraria'),
---   ('consulta@email.com',  'Consulta');
+-- Exemplo de como atribuir papel + nome:
+-- insert into public.perfis (email, perfil, nome) values
+--   ('tesoureira@email.com', 'Tesouraria', 'Maria Silva'),
+--   ('consulta@email.com',   'Consulta',   'João Souza');
+-- P/ preencher o nome das contas já criadas:
+-- update public.perfis set nome = 'Maria Silva' where email = 'tesoureira@email.com';
 
 -- (Opcional) Habilite Row Level Security e políticas se quiser usar anon key
 -- em vez de service_role. Para um app interno de comissão, service_role nos

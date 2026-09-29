@@ -59,13 +59,14 @@ def _login_supabase(email: str, senha: str) -> str | None:
         return None
     user_email = (resp.user.email if resp.user else email)
     try:
-        rows = db().table("perfis").select("perfil").eq("email", user_email.lower()).execute().data
+        rows = db().table("perfis").select("perfil,nome").eq("email", user_email.lower()).execute().data
         if not rows:
             return None  # conta válida, mas sem papel atribuído
         perfil = rows[0]["perfil"]
     except Exception:
         return None
     st.session_state["auth_user"] = user_email.lower()
+    st.session_state["auth_name"] = (rows[0].get("nome") or "").strip()
     try:
         if resp.session and resp.session.access_token:
             st.session_state["auth_token"] = resp.session.access_token
@@ -82,7 +83,7 @@ def _sign_out():
             create_client(url, key).auth.sign_out()
         except Exception:
             pass
-    for k in ("perfil", "auth_user", "auth_token"):
+    for k in ("perfil", "auth_user", "auth_name", "auth_token"):
         st.session_state.pop(k, None)
 
 def _auth_client():
@@ -108,10 +109,11 @@ def _trocar_senha_por_recovery(code: str, nova_senha: str):
         c.auth.update_user({"password": nova_senha})    # grava a nova senha
         user = c.auth.get_user().user
         email = (user.email or "").lower() if user else ""
-        rows = db().table("perfis").select("perfil").eq("email", email).execute().data
+        rows = db().table("perfis").select("perfil,nome").eq("email", email).execute().data
         if not rows:
             return None
         st.session_state["auth_user"] = email
+        st.session_state["auth_name"] = (rows[0].get("nome") or "").strip()
         return rows[0]["perfil"]
     except Exception:
         return None
@@ -728,7 +730,8 @@ with st.sidebar:
           style="margin-top:16px">{'🔑 Tesouraria' if is_admin else '👁 Consulta'}</span>
     """, unsafe_allow_html=True)
     if st.session_state.get("auth_user"):
-        st.caption(esc(st.session_state["auth_user"]))
+        _quem = st.session_state.get("auth_name") or st.session_state["auth_user"]
+        st.caption(f"👋 {esc(_quem)}")
     if _demo_ativo():
         st.markdown('<span class="sb-badge">Ambiente de demonstração</span>',
                     unsafe_allow_html=True)
