@@ -101,8 +101,9 @@ def test_meta_ano_2026():
 def test_arrecadacao_por_ano():
     anos = F.arrecadacao_por_ano(ALL)
     # Mensalidades 2025: 9*200(01A) + 200(02B) + 600(03A desistente) = 2600
-    assert anos["2025"] == 2600.0
-    assert anos["2026"] == 250.0  # só a mensalidade de 01A em jan/26
+    # MENOS 200 devolvidos ao desistente em 2025 -> 2400 LÍQUIDOS
+    assert anos["2025"] == 2400.0
+    assert anos["2026"] == 250.0  # só a mensalidade de 01A em jan/26 (sem devolução em 26)
 
 
 # ─── painel / caixa ─────────────────────────────────────────────────────────
@@ -121,6 +122,9 @@ def test_painel_consistente():
     assert p["patrimonio"] == -800 + 3500
     # total mensalidades inclui o que desistente pagou? Sim: é tudo o que entrou.
     assert p["total_mensalidades"] == 2850.0
+    # devoluções aos desistentes NÃO ficam congeladas na arrecadação:
+    assert p["total_devolucoes"] == 200.0
+    assert p["arrecadacao_liquida"] == 2650.0  # 2850 - 200
     # inadimplência: só 02B deve (1850) até 2026-01
     assert p["inadimplencia"] == 1850.0
     assert p["n_ativos"] == 2

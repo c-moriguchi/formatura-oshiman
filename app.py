@@ -793,7 +793,8 @@ if secao == "Visão geral":
     st.markdown(sec("Caixa consolidado"), unsafe_allow_html=True)
     cards(
         ("Saldo total", F.fmt_brl(p["patrimonio"]), "green"),
-        ("Mensalidades arrecadadas", F.fmt_brl(p["total_mensalidades"]), "blue"),
+        ("Arrecadação líquida", F.fmt_brl(p["arrecadacao_liquida"]), "blue"),
+        ("Devolvido", F.fmt_brl(p["total_devolucoes"]) if p["total_devolucoes"] else "—", "orange"),
         ("Inadimplência", F.fmt_brl(p["inadimplencia"]), "red" if p["inadimplencia"] else "green"),
         ("Rendimento acumulado", F.fmt_brl(p["rendimento"]), "orange"),
     )
@@ -871,9 +872,9 @@ if secao == "Visão geral":
         st.markdown(render_table(["Item", "Quando", "Valor"], rows,
                                  right_align=(2,)), unsafe_allow_html=True)
 
-    st.caption("Fórmulas: total arrecadado = soma das mensalidades; "
-               "saldo conta = soma do extrato; investimento = aportes − resgates. "
-               "Confira com o extrato — as contas vivem centralizadas em `financeiro.py`.")
+    st.caption("Arrecadação líquida = mensalidades − devolvidas (desistentes). "
+               "Saldo conta = soma do extrato; investimento = aportes − resgates. "
+                   "Confira com o extrato — as contas vivem centralizadas em `financeiro.py`.")
 
 
 # ─── SEÇÃO 1 — MÊS CORRENTE (prévia) ────────────────────────────────────────

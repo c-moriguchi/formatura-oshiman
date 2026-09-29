@@ -281,12 +281,16 @@ def calc_meta_ano(periodos, n_ativos: int, ano: int) -> float:
 
 
 def arrecadacao_por_ano(trans_rows) -> dict:
-    """{ano: soma de MENSALIDADE}."""
+    """{ano: arrecadação LÍQUIDA} — mensalidades menos o que foi devolvido no ano."""
     out = defaultdict(float)
     for r in trans_rows:
-        if r.get("categoria") == "MENSALIDADE":
-            data = r.get("data") or ""
-            out[str(data)[:4]] += float(r.get("valor", 0.0))
+        ano = str(r.get("data") or "")[:4]
+        cat = r.get("categoria")
+        v = float(r.get("valor", 0.0))
+        if cat == "MENSALIDADE":
+            out[ano] += v
+        elif cat == "DEVOLUCAO":
+            out[ano] -= abs(v)
     return {k: round(v, 2) for k, v in sorted(out.items())}
 
 
@@ -333,6 +337,7 @@ def calcular_painel(trans_rows, periodos, alunos, ate_ym: str) -> dict:
     return {
         "total_mensalidades": round(mensal, 2),
         "total_devolucoes": round(abs(devol), 2),
+        "arrecadacao_liquida": round(mensal - abs(devol), 2),
         "inadimplencia": round(inadimplencia, 2),
         "rendimento": round(rendimento, 2),
         "saldo_conta": round(saldo_conta, 2),
