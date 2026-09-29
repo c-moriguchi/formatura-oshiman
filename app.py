@@ -452,6 +452,16 @@ def get_despesas():
     return db().table("despesas").select("*").order("id", desc=True).execute().data
 
 
+def get_investimento() -> dict | None:
+    rows = db().table("investimento").select("*").eq("id", 1).execute().data
+    return rows[0] if rows else None
+
+
+def guardar_saldo_invest(saldo: float):
+    db().table("investimento").upsert(
+        {"id": 1, "saldo_informado": saldo}).execute()
+
+
 def codificar_nota(upload) -> tuple | None:
     """Retorna (b64, nome, tipo) do arquivo de nota, ou None."""
     if upload is None:
@@ -805,6 +815,36 @@ if secao == "Visão geral":
         'rendimentos − despesas. Despesas = saídas não reconhecidas como aplicação '
         '(controle/inventário de despesas em breve).</div>',
         unsafe_allow_html=True)
+
+    # Monitor de investimento (saldo informado x aportes do extrato -> rendimento)
+    st.markdown(sec("Monitor de investimento"), unsafe_allow_html=True)
+    inv_row = get_investimento()
+    saldo_inf = (inv_row or {}).get("saldo_informado")
+    iv = F.investimento_resumo(trans_rows, saldo_inf)
+    c1, c2 = st.columns([3, 1])
+    novo_saldo = c1.number_input("Saldo do investimento (R$ — o que o banco/investimento mostra)",
+                                 value=float(saldo_inf or 0.0), step=100.0, key="inv_saldo")
+    if c2.button("Guardar saldo"):
+        if novo_saldo != saldo_inf:
+            guardar_saldo_invest(novo_saldo)
+            st.rerun()
+        elif saldo_inf is None:
+            st.info("Informe um saldo e clique em Guardar.")
+    if saldo_inf is not None:
+        cards(
+            ("Aportes (do extrato)", F.fmt_brl(iv["aportes"]), "blue"),
+            ("Resgates", F.fmt_brl(iv["resgates"]), "green"),
+            ("Saldo informado", F.fmt_brl(iv["saldo_informado"]), "orange"),
+            ("Rendimento calculado", F.fmt_brl(iv["rendimento"]), "green"),
+        )
+        st.markdown(
+            f'<div class="page-sub">Rendimento = saldo informado − aportes + resgates '
+            f'= {F.fmt_brl(iv["saldo_informado"])} − {F.fmt_brl(iv["aportes"])} '
+            f'+ {F.fmt_brl(iv["resgates"])}.</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="info-box">Informe o saldo do investimento acima '
+                    'para o app calcular o rendimento pela diferença '
+                    '(saldo − somatório dos aportes).</div>', unsafe_allow_html=True)
 
     # Arrecadação por ano (meta x atingido)
     st.markdown(sec("Arrecadação por ano"), unsafe_allow_html=True)

@@ -150,6 +150,9 @@ def _gera_dados():
         {"id": 4, "descricao": "Mensalidade 2028", "data": "Jan a Dez", "valor": 3900.0},
         {"id": 5, "descricao": "Encerramento", "data": "Dezembro/28", "valor": 600.0},
     ]
+    # investimento (saldo informado)
+    data["investimento"] = [{"id": 1, "saldo_informado": 19050.0,
+                             "atualizado_em": "2026-09-01T10:00:00"}]
     # despesas (inventário)
     import base64
     nota_ex = base64.b64encode(b"NOTA FICTICIA DE DEMO - CONTRATO BUFFET").decode()

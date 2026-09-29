@@ -280,3 +280,27 @@ def test_resumo_despesas_prev_vs_concretizado():
 def test_resumo_despesas_vazio():
     r = F.resumo_despesas([])
     assert r == {"concretizado": 0.0, "previsto": 0.0, "total": 0.0, "n": 0}
+
+
+# ─── monitor de investimento (case 3) ───────────────────────────────────────
+def test_investimento_sem_saldo_nada_de_rendimento():
+    trans = [
+        {"categoria": "INVESTIMENTO", "valor": -3000.0},
+        {"categoria": "INVESTIMENTO", "valor": -1000.0},
+        {"categoria": "RESGATE", "valor": 500.0},
+    ]
+    iv = F.investimento_resumo(trans)
+    assert iv["aportes"] == 4000.0 and iv["resgates"] == 500.0 and iv["rendimento"] is None
+
+
+def test_investimento_rendimento_saldo_menos_aportes():
+    trans = [
+        {"categoria": "INVESTIMENTO", "valor": -3000.0},
+        {"categoria": "INVESTIMENTO", "valor": -1000.0},
+        {"categoria": "RESGATE", "valor": 500.0},
+    ]
+    # saldo 3500 = aportes 4000 - resgates 500 + rendimento 0
+    iv = F.investimento_resumo(trans, saldo_informado=3500.0)
+    assert iv["rendimento"] == 0.0
+    # saldo 3555 -> rendimento 55
+    assert F.investimento_resumo(trans, saldo_informado=3555.0)["rendimento"] == 55.0

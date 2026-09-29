@@ -59,6 +59,16 @@ create table if not exists public.orcamento (
   valor numeric not null default 0
 );
 
+-- ---------- investimento (saldo informado manualmente p/ monitor) ----------
+-- Guarda o saldo REAL do investimento que a tesoureira informa. O app calcula
+-- os aportes pelo extrato e deriva o rendimento (saldo − aportes + resgates).
+create table if not exists public.investimento (
+  id int primary key default 1,     -- sempre a linha 1 (um único registro)
+  saldo_informado numeric,
+  atualizado_em timestamptz not null default now()
+);
+-- insert into public.investimento (id, saldo_informado) values (1, 113000.00);
+
 -- ---------- perfis (login via Supabase Auth) ----------
 -- Cada usuario do Auth precisa de uma linha aqui definindo o papel.
 -- Insira com o email exato da conta (minúsculo). Se o papel não existir,

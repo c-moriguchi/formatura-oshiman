@@ -254,6 +254,24 @@ def resumo_por_categoria(trans_rows) -> dict:
     return dict(out)
 
 
+def investimento_resumo(trans_rows, saldo_informado=None) -> dict:
+    """Monitor do investimento.
+
+    - aportes  = soma das aplicações que saíram da conta corrente (INVESTIMENTO)
+    - resgates = soma do que voltou do investimento para a conta (RESGATE)
+    - rendimento = saldo informado − aportes + resgates
+                  (se não informou o saldo ainda, rendimento = None)
+    """
+    inv = resumo_por_categoria(trans_rows)
+    aportes = round(-inv.get("INVESTIMENTO", 0.0), 2)
+    resgates = round(inv.get("RESGATE", 0.0), 2)
+    rend = None
+    if saldo_informado is not None:
+        rend = round(float(saldo_informado) - aportes + resgates, 2)
+    return {"aportes": aportes, "resgates": resgates,
+            "saldo_informado": saldo_informado, "rendimento": rend}
+
+
 def calc_meta_ano(periodos, n_ativos: int, ano: int) -> float:
     """Meta esperada de um ano = nº de alunos ativos × soma do valor mensal no ano."""
     soma_ano = 0.0
