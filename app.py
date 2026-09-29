@@ -443,13 +443,6 @@ def confirmar_fechamento(ym: str, usuario: str):
     }).eq("ano_mes", ym).execute()
 
 
-def quem_pagou_no_mes(ym: str) -> set:
-    """Uma query só: conjunto de aluno_id com mensalidade no mês (corrige N+1)."""
-    rows = db().table("transacoes").select("aluno_id").eq("categoria", "MENSALIDADE") \
-        .like("data", f"{ym}%").execute().data
-    return {r["aluno_id"] for r in rows if r["aluno_id"]}
-
-
 def get_orcamento():
     return db().table("orcamento").select("id,descricao,data,valor").order("data").execute().data
 
@@ -836,21 +829,26 @@ elif secao == "Mês corrente":
     Ninguém é considerado devedor aqui — isso só acontece após o fechamento do mês.</div>
     """, unsafe_allow_html=True)
 
-    pagantes = quem_pagou_no_mes(hoje_ym)  # uma query, não uma por aluno
-    pagaram = [a for a in ativos if a["id"] in pagantes]
-    nao_pagaram = [a for a in ativos if a["id"] not in pagantes]
+    trans_rows = get_transacoes()
+    trans = F.carregar_transacoes_agrupadas(trans_rows)
+    # Em dia neste mês = o mês atual já está integralmente coberto pelo total pago
+    # (regra FIFO: o dinheiro quita desde o mês mais antigo). Isso inclui quem pagou
+    # o ano inteiro ou vários meses de uma vez — e não gera lembrete errado.
+    pagaram = [a for a in ativos
+               if F.calcular_aluno(a, periodos, trans, hoje_ym)["mes_atual_pago"]]
+    nao_pagaram = [a for a in ativos if a not in pagaram]
 
     cards(
-        ("Já pagaram", str(len(pagaram)), "green"),
-        ("Ainda não pagaram", str(len(nao_pagaram)), "orange"),
+        ("Em dia até hoje", str(len(pagaram)), "green"),
+        ("Pendente", str(len(nao_pagaram)), "orange"),
         ("Total ativos", str(len(ativos)), "blue"),
     )
     if ativos:
         pct = len(pagaram) / len(ativos) * 100
         st.markdown(
             f'<div class="progress"><div style="width:{pct:.0f}%"></div></div>'
-            f'<div class="progress-hint">{pct:.0f}% dos integrantes já pagaram '
-            f'{F.fmt_mes(hoje_ym)} · prazo até dia 30.</div>',
+            f'<div class="progress-hint">{pct:.0f}% já cobriram {F.fmt_mes(hoje_ym)} '
+            f'(quem pagou adiantado/à vista conta como pago). Prazo até dia 30.</div>',
             unsafe_allow_html=True)
 
     if nao_pagaram:
@@ -932,7 +930,10 @@ elif secao == "Situação dos alunos":
                 badge = f'<span class="badge badge-green">Em dia{adiant_str}</span>'
                 ic = ""
             else:
-                badge = f'<span class="badge badge-red">Deve {F.fmt_brl(abs(saldo))}</span>'
+                desde = (f'desde {F.fmt_mes(calc["mes_inicial_debito"])} '
+                         if calc.get("mes_inicial_debito") else "")
+                badge = (f'<span class="badge badge-red">Deve {F.fmt_brl(abs(saldo))} '
+                         f'{desde}</span>')
                 msg = (f"Olá! Consta um débito de {F.fmt_brl(abs(saldo))} dos meses "
                        f"já fechados da Formatura. Podemos confirmar o pagamento? 🎓")
                 ic = wa_icon(a.get("celular"), msg, is_admin)

@@ -154,6 +154,56 @@ def get_meses_adiantados(periodos, credito: float, ate_ym: str) -> int:
     return count
 
 
+# ─── ATRIBUIÇÃO POR MÊS (regra FIFO dos pagamentos) ─────────────────────────
+# A regra da comissao: cada pagamento quita o mês mais antigo em aberto primeiro
+# e o valor excedente rola para o proximo mês. Ex.: pagou 1200 num ano de 100/mês
+# -> 100 em cada mês. Pagou 240 com 2 meses devendo -> 100 jan, 100 fev, 40 mar.
+# O resultado final depende apenas do TOTAL pago (a ordem dos lançamentos não
+# muda a alocação), entao usamos total_pago para montar o calendário.
+
+def alocacao_mensal(periodos, total_pago: float, ate_ym: str) -> list:
+    """Distribui o total pago nos meses (FIFO) e devolve [{ym, devido, pago}] até ate_ym."""
+    if not periodos:
+        return []
+    out = []
+    restante = float(total_pago)
+    ym = periodos[0][0]
+    while ym <= ate_ym:
+        v = arred(get_valor_mes(periodos, ym))
+        if v > 0:
+            pago = min(v, restante)
+            restante = max(0.0, restante - v)
+        else:
+            pago = 0.0
+        out.append({"ym": ym, "devido": arred(v), "pago": arred(pago)})
+        ym = next_ym(ym)
+    return out
+
+
+def analise_mensal(periodos, total_pago: float, ate_ym: str) -> dict:
+    """Interpreta o calendário FIFO até ate_ym.
+
+    Retorna:
+      - calendario        : [{ym, devido, pago}]
+      - mes_inicial_debito: primeiro mês (<= ate_ym) não integralmente pago, ou None
+      - mes_atual_pago    : bool — o próprio mês de ate_ym está integralmente pago
+      - divida            : total não pago até ate_ym
+    """
+    cal = alocacao_mensal(periodos, total_pago, ate_ym)
+    primeiro = None
+    for m in cal:
+        if m["devido"] > 0 and m["pago"] < m["devido"]:
+            primeiro = m["ym"]
+            break
+    mes_atual_pago = True
+    if cal:
+        ult = cal[-1]
+        mes_atual_pago = ult["pago"] >= ult["devido"] if ult["devido"] > 0 else True
+    divida = arred(sum(max(0.0, m["devido"] - m["pago"]) for m in cal))
+    return {"calendario": cal, "mes_inicial_debito": primeiro,
+            "mes_atual_pago": mes_atual_pago, "divida": divida}
+
+
 def calcular_aluno(aluno, periodos, trans, ate_ym: str) -> dict:
     """
     Situação financeira de um aluno até ate_ym.
@@ -177,6 +227,7 @@ def calcular_aluno(aluno, periodos, trans, ate_ym: str) -> dict:
 
     meta = arred(get_meta_acumulada(periodos, aluno, ate_ym))
     saldo = arred(total_pago - meta)
+    ana = analise_mensal(periodos, total_pago, ate_ym)
     return {
         "total_pago": total_pago,
         "devolucao": 0.0,
@@ -184,6 +235,10 @@ def calcular_aluno(aluno, periodos, trans, ate_ym: str) -> dict:
         "meta": meta,
         "saldo": saldo,
         "adiantados": get_meses_adiantados(periodos, saldo, ate_ym),
+        # atribuição por mês (regra FIFO)
+        "mes_atual_pago": ana["mes_atual_pago"],
+        "mes_inicial_debito": ana["mes_inicial_debito"],
+        "divida_mensal": ana["divida"],
     }
 
 

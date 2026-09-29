@@ -173,3 +173,46 @@ def test_html_marca_seguro_sem_escapar():
     h = F.Html('<span class="badge badge-green">ok</span>')
     assert isinstance(h, F.Html)
     assert str(h) == '<span class="badge badge-green">ok</span>'
+
+
+# ─── regra de pagamento por mês (FIFO) — cenários reais da comissão ─────────
+PERIODOS_2026 = [("2026-01", 100.0)]  # 100/mês durante todo 2026
+
+
+def _aluno():
+    return {"id": "X", "status": "Ativo", "data_desistencia": None}
+
+
+def _calcular(total: float, ate: str):
+    trans = {"X": {"mensalidade": total, "devolucao": 0.0}}
+    return F.calcular_aluno(_aluno(), PERIODOS_2026, trans, ate)
+
+
+def test_pagou_ano_inteiro_de_uma_vez():
+    """1200 em janeiro = 100 em cada mês; ninguém fica devendo."""
+    ana = F.analise_mensal(PERIODOS_2026, 1200.0, "2026-12")
+    assert len(ana["calendario"]) == 12
+    assert all(m["pago"] == m["devido"] == 100.0 for m in ana["calendario"])
+    assert ana["mes_atual_pago"] is True
+    assert ana["mes_inicial_debito"] is None
+    c = _calcular(1200.0, "2026-12")
+    assert c["mes_atual_pago"] is True and c["divida_mensal"] == 0.0
+
+
+def test_devendo_2_meses_paga_300_fica_adimplente():
+    """Devendo jan+fev, paga 300 no dia 03/03 -> 100 pra cada mês; adimplente até 31/03."""
+    ana = F.analise_mensal(PERIODOS_2026, 300.0, "2026-03")
+    assert [m["pago"] for m in ana["calendario"]] == [100.0, 100.0, 100.0]
+    assert ana["mes_atual_pago"] is True and ana["mes_inicial_debito"] is None
+    assert F.calcular_aluno(_aluno(), PERIODOS_2026, {"X": {"mensalidade": 300.0, "devolucao": 0}}, "2026-03")["saldo"] == 0.0
+
+
+def test_paga_240_falta_60_para_marco():
+    """240 -> 100 jan, 100 fev, 40 mar; falta 60 p/ março (devendo até 31/03)."""
+    ana = F.analise_mensal(PERIODOS_2026, 240.0, "2026-03")
+    assert [m["pago"] for m in ana["calendario"]] == [100.0, 100.0, 40.0]
+    assert ana["mes_atual_pago"] is False
+    assert ana["mes_inicial_debito"] == "2026-03"
+    assert ana["divida"] == 60.0
+    c = _calcular(240.0, "2026-03")
+    assert c["divida_mensal"] == 60.0 and c["mes_inicial_debito"] == "2026-03"
