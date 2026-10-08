@@ -158,6 +158,9 @@ def _gera_dados():
     # investimento (saldo informado)
     data["investimento"] = [{"id": 1, "saldo_informado": 19050.0,
                              "atualizado_em": "2026-09-01T10:00:00"}]
+    # conta corrente (saldo informado p/ conciliação)
+    data["conta_saldo"] = [{"id": 1, "saldo_informado": None,
+                            "atualizado_em": None}]
     # despesas (inventário)
     import base64
     nota_ex = base64.b64encode(b"NOTA FICTICIA DE DEMO - CONTRATO BUFFET").decode()

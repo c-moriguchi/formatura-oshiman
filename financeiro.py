@@ -364,6 +364,21 @@ def total_orcamento(itens) -> float:
     return round(sum(float(i.get("valor", 0.0)) for i in itens), 2)
 
 
+# ─── CONCILIAÇÃO BANCÁRIA ──────────────────────────────────────────────────
+def concatenar(saldo_calculado: float, saldo_informado: float) -> float:
+    """Diferença (ajuste) entre o saldo calculado pelo app e o saldo real do banco.
+
+    Positivo = o banco tem MAIS do que o app calculou (falta lançar entrada no extrato).
+    Negativo = o banco tem MENOS (falta lançar saída/estorno no extrato).
+    """
+    return round(float(saldo_informado) - float(saldo_calculado), 2)
+
+
+def calcular_saldo_conta(trans_rows) -> float:
+    """Saldo da conta corrente = soma de TODAS as transações (o que o banco deveria mostrar)."""
+    return round(sum(float(r.get("valor", 0.0)) for r in trans_rows), 2)
+
+
 # ─── INVENTÁRIO DE DESPESAS ────────────────────────────────────────────────
 def resumo_despesas(itens) -> dict:
     """Resumo do inventário: previstas x concretizadas (com nota)."""

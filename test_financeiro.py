@@ -325,3 +325,24 @@ def test_emails_lista():
     assert F.emails_lista({"emails_acesso": "A@X.com, b @y.com, , c@z"}) == ["a@x.com", "b @y.com", "c@z"]
     assert F.emails_lista({}) == []
     assert F.emails_lista({"emails_acesso": None}) == []
+
+
+# ─── conciliação bancária (ajuste manual) ───────────────────────────────────
+def test_concatenar_banco_maior_deve_ser_positivo():
+    # banco tem mais do que o app calculou => ajuste positivo (falta lançar entrada)
+    assert F.concatenar(saldo_calculado=119050.18, saldo_informado=119450.18) == 400.0
+
+
+def test_concatenar_banco_menor_deve_ser_negativo():
+    assert F.concatenar(saldo_calculado=119050.18, saldo_informado=118650.18) == -400.0
+
+
+def test_concatenar_igual_zero():
+    assert F.concatenar(1250.00, 1250.00) == 0.0
+
+
+def test_calcular_saldo_conta_soma_tudo():
+    trans = [
+        {"valor": 200.0}, {"valor": -1200.0}, {"valor": 500.0}, {"valor": 0.5},
+    ]
+    assert F.calcular_saldo_conta(trans) == -499.5

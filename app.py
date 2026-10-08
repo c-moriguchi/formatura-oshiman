@@ -91,15 +91,39 @@ def _auth_client():
     return create_client(_secrets_get("SUPABASE_URL"), _secrets_get("SUPABASE_SERVICE_KEY"))
 
 
-def _enviar_link_recuperacao(email: str) -> bool:
-    """Dispara o email de recuperação do Supabase (link p/ definir nova senha)."""
-    if not email or not email.strip():
-        return False
+def _msg_erro_recuperacao(exc: Exception) -> str:
+    """Humaniza o erro do Supabase no fluxo de recuperação (nunca vaza chave/token)."""
+    _sto = str(exc)
+    _sl = _sto.lower()
+    if "captcha" in _sl:
+        return "O Supabase exige captcha para redefinir senha — ative CAPTCHA nos secrets ou desative no painel."
+    if "unregistered user" in _sl or "user not found" in _sl or "email not found" in _sl:
+        return "Este e-mail não está cadastrado no app. Confira se digitou o mesmo e-mail da conta."
+    if "redirect" in _sl or "site url" in _sl or _sto.startswith("http"):
+        return f"Supabase recusou o link (redirect não liberado). Veja o erro: {_sto[:200]}"
+    if "422" in _sto or "400" in _sto:
+        return f"Supabase recusou a solicitação ({_sto[:200]})."
+    return f"Falha ao enviar. Detalhe: {_sto[:200]}"
+
+
+def _log_erro_auth(exc: Exception) -> None:
+    """Registra o erro de auth (fica só em st.warning/console, sem expor token)."""
+    import logging
+    logging.getLogger("auth").warning("reset_password_for_email: %s", exc)
+
+
+def _enviar_link_recuperacao(email: str) -> tuple[bool, str]:
+    """Dispara o email de recuperação do Supabase (link p/ definir nova senha).
+    Retorna (ok, msg): msg é '' em sucesso ou o erro humanizado."""
+    email = (email or "").strip().lower()
+    if not email:
+        return False, "Informe um e-mail."
     try:
-        _auth_client().auth.reset_password_for_email(email.strip().lower())
-        return True
-    except Exception:
-        return False
+        _auth_client().auth.reset_password_for_email(email)
+        return True, ""
+    except Exception as e:
+        _log_erro_auth(e)
+        return False, _msg_erro_recuperacao(e)
 
 
 def _trocar_senha_por_recovery(code: str, nova_senha: str):
@@ -462,6 +486,16 @@ def guardar_saldo_invest(saldo: float):
         {"id": 1, "saldo_informado": saldo}).execute()
 
 
+def get_conta_saldo() -> dict | None:
+    rows = db().table("conta_saldo").select("*").eq("id", 1).execute().data
+    return rows[0] if rows else None
+
+
+def guardar_saldo_conta(saldo: float):
+    db().table("conta_saldo").upsert(
+        {"id": 1, "saldo_informado": saldo}).execute()
+
+
 def revogar_acessos(aluno_ids) -> int:
     """Revoga o login no app das contas vinculadas aos alunos (desistentes).
 
@@ -717,10 +751,11 @@ def tela_login():
                     unsafe_allow_html=True)
                 remail = st.text_input("E-mail")
                 if st.button("Enviar link de recuperação", type="primary", width="stretch"):
-                    if _enviar_link_recuperacao(remail):
+                    _ok_envio, _msg_envio = _enviar_link_recuperacao(remail)
+                    if _ok_envio:
                         st.info("Link enviado! Confira seu email para definir a nova senha.")
                     else:
-                        st.error("Não foi possível enviar. Confira o email digitado.")
+                        st.error(_msg_envio)
                 if st.button("Voltar ao login"):
                     st.session_state.pop("recuperar", None)
                     st.rerun()
@@ -881,6 +916,60 @@ if secao == "Visão geral":
         st.markdown('<div class="info-box">Informe o saldo do investimento acima '
                     'para o app calcular o rendimento pela diferença '
                     '(saldo − somatório dos aportes).</div>', unsafe_allow_html=True)
+
+    # Conciliação bancária — só Tesouraria
+    st.markdown(sec("Conciliação bancária"), unsafe_allow_html=True)
+    if not is_admin:
+        st.markdown('<div class="info-box">🔒 Disponível apenas para Tesouraria.</div>',
+                    unsafe_allow_html=True)
+    else:
+        conta_ref = get_conta_saldo()
+        saldo_conta_inf = (conta_ref or {}).get("saldo_informado")
+        saldo_conta_calc = p["saldo_conta"]
+        c1, c2 = st.columns([3, 1])
+        novo_conta = c1.number_input(
+            "Saldo da conta corrente no banco (R$ — o que o app do banco mostra)",
+            value=float(saldo_conta_inf or 0.0), step=100.0, key="conta_saldo")
+        if c2.button("Guardar saldo da conta"):
+            if novo_conta != saldo_conta_inf:
+                guardar_saldo_conta(novo_conta)
+                st.rerun()
+            elif saldo_conta_inf is None:
+                st.info("Informe o saldo e clique em Guardar.")
+        if saldo_conta_inf is not None:
+            diff = F.concatenar(saldo_conta_calc, saldo_conta_inf)
+            cards(
+                ("Saldo calculado (extrato)", F.fmt_brl(saldo_conta_calc), "blue"),
+                ("Saldo informado (banco)", F.fmt_brl(saldo_conta_inf), "green"),
+                ("Diferença", F.fmt_brl(diff),
+                 "green" if abs(diff) < 0.005 else "red"),
+            )
+            if abs(diff) < 0.005:
+                st.markdown('<div class="info-box">✔ Saldo da conta bate com o banco.</div>',
+                            unsafe_allow_html=True)
+            else:
+                st.markdown(
+                    f'<div class="info-box" style="color:#b02a2a">⚠️ O saldo calculado '
+                    f'({F.fmt_brl(saldo_conta_calc)}) DIVERGE do saldo do banco '
+                    f'({F.fmt_brl(saldo_conta_inf)}). Diferença: {F.fmt_brl(diff)}. '
+                    f'Isso indica erro no extrato importado.</div>', unsafe_allow_html=True)
+                obs_aj = st.text_input("Observação do ajuste (motivo da correção)",
+                                       key="ajuste_obs",
+                                       placeholder="ex.: resgate 400 faltante no extrato out/2025")
+                if st.button("Lançar ajuste de R$ " + F.fmt_brl(diff), type="secondary",
+                             key="btn_ajuste"):
+                    _data_aj = f"{ate_ym}-01" if len(ate_ym) == 7 else ate_ym
+                    db().table("transacoes").insert([{
+                        "data": _data_aj, "descricao": "AJUSTE (conciliação bancária)",
+                        "valor": diff, "categoria": "AJUSTE",
+                        "aluno_id": None, "observacao": (obs_aj or "").strip(),
+                    }]).execute()
+                    st.success("Ajuste lançado! O saldo calculado agora considera a correção.")
+                    st.rerun()
+        else:
+            st.markdown('<div class="info-box">Informe o saldo da conta corrente '
+                        '(o que o app do banco mostra) para o app comparar '
+                        'com o saldo calculado pelas transações.</div>', unsafe_allow_html=True)
 
     # Arrecadação por ano (meta x atingido)
     st.markdown(sec("Arrecadação por ano"), unsafe_allow_html=True)

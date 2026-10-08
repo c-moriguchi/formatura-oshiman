@@ -71,6 +71,16 @@ create table if not exists public.investimento (
 );
 -- insert into public.investimento (id, saldo_informado) values (1, 113000.00);
 
+-- ---------- conta_saldo (saldo da conta corrente informado p/ conciliação) ----------
+-- A tesoureira informa o saldo REAL da conta no banco. O app compara com o saldo
+-- calculado pelas transações e mostra a divergência (permite lançar AJUSTE).
+create table if not exists public.conta_saldo (
+  id int primary key default 1,     -- sempre a linha 1 (um único registro)
+  saldo_informado numeric,
+  atualizado_em timestamptz not null default now()
+);
+-- insert into public.conta_saldo (id, saldo_informado) values (1, 0.00);
+
 -- ---------- perfis (login via Supabase Auth) ----------
 -- Cada usuario do Auth precisa de uma linha aqui definindo o papel.
 -- Insira com o email exato da conta (minúsculo). Se o papel não existir,
