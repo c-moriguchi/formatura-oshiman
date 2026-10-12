@@ -188,6 +188,13 @@ def _trocar_senha_por_access_token(access_token: str, refresh_token: str, nova_s
     return rows[0]["perfil"], ""
 
 
+def _diagnostico_reset_on() -> bool:
+    """Liga o diagnóstico do reset de senha (mostra tamanho capturado, nunca a senha).
+    Ativa só com a variável DIAG_RESET=1 — útil ao investigar; desligado por padrão."""
+    import os
+    return os.environ.get("DIAG_RESET") == "1"
+
+
 def _injetar_captura_recovery():
     """Injeta JS que move o token de recuperação do `#` (fragmento, invisível ao
     servidor do Streamlit) para a query `?recovery_...`, e recarrega a página com
@@ -810,6 +817,11 @@ def tela_login():
                 nova = st.text_input("Nova senha", type="password", key="rec_pass")
                 nova2 = st.text_input("Confirme a nova senha", type="password", key="rec_pass2")
                 confere = bool(nova) and nova == nova2 and len(nova) >= 6
+                # Diagnóstico interno: mostra o tamanho capturado (nunca a senha) p/ investigar
+                if _diagnostico_reset_on():
+                    st.caption(f"[diag] nova={len(nova if nova else '')} carac, "
+                               f"nova2={len(nova2 if nova2 else '')} carac, "
+                               f"iguais={bool(nova) and nova == nova2}")
                 if st.button("Salvar nova senha", type="primary", width="stretch"):
                     if confere:
                         _perfil, _erro = _trocar_senha_por_access_token(
