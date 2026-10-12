@@ -92,18 +92,25 @@ def _auth_client():
 
 
 def _msg_erro_recuperacao(exc: Exception) -> str:
-    """Humaniza o erro do Supabase no fluxo de recuperação (nunca vaza chave/token)."""
+    """Humaniza o erro do Supabase no fluxo de recuperação (nunca vaza chave/token).
+
+    Regra anti-enumeração: e-mail inexistente é tratado como se fosse sucesso
+    (mensagem neutra), para não revelar quais endereços estão cadastrados.
+    Erros de configuração (captcha/rate-limit/redirect) aparecem com detalhe."""
     _sto = str(exc)
     _sl = _sto.lower()
-    if "captcha" in _sl:
-        return "O Supabase exige captcha para redefinir senha — ative CAPTCHA nos secrets ou desative no painel."
     if "unregistered user" in _sl or "user not found" in _sl or "email not found" in _sl:
-        return "Este e-mail não está cadastrado no app. Confira se digitou o mesmo e-mail da conta."
+        # mensagem idêntica ao sucesso -> não delata se a conta existe
+        return "SE_EMAIL_EXISTE_LINK_ENVIADO"
+    if "captcha" in _sl:
+        return "O serviço de e-mail está pedindo verificação — tente em alguns instantes."
     if "redirect" in _sl or "site url" in _sl or _sto.startswith("http"):
-        return f"Supabase recusou o link (redirect não liberado). Veja o erro: {_sto[:200]}"
+        return "O serviço de e-mail está com a configuração de redirecionamento incompleta."
     if "422" in _sto or "400" in _sto:
-        return f"Supabase recusou a solicitação ({_sto[:200]})."
-    return f"Falha ao enviar. Detalhe: {_sto[:200]}"
+        return "Não foi possível enviar o link agora — tente novamente em instantes."
+    if "rate limit" in _sl or "rate_limit" in _sl:
+        return "Você pediu muitos e-mails em pouco tempo. Aguarde alguns minutos e repita."
+    return "Não foi possível enviar o link agora — tente novamente em instantes."
 
 
 def _log_erro_auth(exc: Exception) -> None:
@@ -843,8 +850,10 @@ def tela_login():
                 remail = st.text_input("E-mail")
                 if st.button("Enviar link de recuperação", type="primary", width="stretch"):
                     _ok_envio, _msg_envio = _enviar_link_recuperacao(remail)
-                    if _ok_envio:
-                        st.info("Link enviado! Confira seu email para definir a nova senha.")
+                    if _ok_envio or _msg_envio == "SE_EMAIL_EXISTE_LINK_ENVIADO":
+                        # Mensagem neutra: nao revela se o email esta cadastrado (anti-enumeracao).
+                        st.info("Se o e-mail estiver cadastrado, você receberá o link "
+                                "para definir uma nova senha.")
                     else:
                         st.error(_msg_envio)
                 if st.button("Voltar ao login"):
