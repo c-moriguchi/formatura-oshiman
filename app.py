@@ -146,23 +146,39 @@ def _trocar_senha_por_recovery(code: str, nova_senha: str):
 
 def _trocar_senha_por_access_token(access_token: str, refresh_token: str, nova_senha: str):
     """Troca a senha quando o link de recuperação veio em formato `#access_token=`
-    (implicit flow). Nada de token e gravado/logado: usamos só em memória e descartamos."""
+    (implicit flow). Nada de token e gravado/logado: usamos só em memória e descartamos.
+    Retorna (perfil, msg_erro_detalhada)."""
     if not access_token:
-        return None
+        return None, "Token ausente no link."
     try:
         c = _auth_client()
+    except Exception as e:
+        return None, f"Falha ao criar cliente de autenticação: {e}"
+    try:
         c.auth.set_session(access_token, refresh_token or "")  # monta a sessão de recuperação
+    except Exception as e:
+        return None, f"Falha ao validar o token do link (pode estar expirado ou reutilizado): {e}"
+    try:
         c.auth.update_user({"password": nova_senha})           # grava a nova senha
+    except Exception as e:
+        return None, f"Falha ao gravar a nova senha no Supabase: {e}"
+    try:
         user = c.auth.get_user().user
         email = (user.email or "").lower() if user else ""
+    except Exception as e:
+        return None, f"Falha ao obter o usuário após a troca: {e}"
+    if not email:
+        return None, "E-mail do usuário não retornado pelo Supabase."
+    try:
         rows = db().table("perfis").select("perfil,nome").eq("email", email).execute().data
-        if not rows:
-            return None
-        st.session_state["auth_user"] = email
-        st.session_state["auth_name"] = (rows[0].get("nome") or "").strip()
-        return rows[0]["perfil"]
-    except Exception:
-        return None
+    except Exception as e:
+        return None, f"Falha ao buscar o perfil do usuário `{email}`: {e}"
+    if not rows:
+        return None, (f"A conta `{email}` não tem perfil definido no app. "
+                      "Adicione uma linha na tabela `perfis` para liberar o login.")
+    st.session_state["auth_user"] = email
+    st.session_state["auth_name"] = (rows[0].get("nome") or "").strip()
+    return rows[0]["perfil"], ""
 
 
 def _injetar_captura_recovery():
@@ -789,15 +805,15 @@ def tela_login():
                 confere = bool(nova) and nova == nova2 and len(nova) >= 6
                 if st.button("Salvar nova senha", type="primary", width="stretch"):
                     if confere:
-                        perfil = _trocar_senha_por_access_token(
+                        _perfil, _erro = _trocar_senha_por_access_token(
                             r_access, _qp("recovery_refresh") or "", nova)
-                        if perfil:
+                        if _perfil:
                             _login_ok()
-                            st.session_state["perfil"] = perfil
+                            st.session_state["perfil"] = _perfil
                             st.rerun()
                         else:
-                            st.error("Não foi possível concluir. Verifique se o link é "
-                                     "válido/recente e se a conta tem perfil definido.")
+                            st.error(_erro or "Não foi possível concluir. "
+                                    "Verifique se o link é válido/recente.")
                     else:
                         st.warning("As senhas não coincidem ou são muito curtas (mínimo 6).")
             elif qcode:  # pessoa clicou no link de recuperação (PKCE ?code=) -> define nova senha
