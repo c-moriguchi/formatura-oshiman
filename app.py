@@ -166,15 +166,15 @@ def _trocar_senha_por_access_token(access_token: str, refresh_token: str, nova_s
 
 
 def _injetar_captura_recovery():
-    """Injeta um snippet JS que move o token de recuperação do `#` (fragmento,
-    que o servidor do Streamlit não enxerga) para a query `?recovery=...`, e
-    recarrega a página com replace() (sem sujar o histórico do navegador).
+    """Injeta JS que move o token de recuperação do `#` (fragmento, invisível ao
+    servidor do Streamlit) para a query `?recovery_...`, e recarrega a página com
+    replace() (limpa o histórico do navegador).
 
-    Nada de token fica gravado/logado por nós: só existe na URL durante a troca
-    de senha e é descartado assim que o app lê e usa. HTTPS já garante o caminho."""
-    return st.markdown(
-        """
-<script>
+    Usa st.html(unsafe_allow_javascript=True): é a única forma de o Streamlit
+    executar JavaScript de verdade (st.markdown ignora <script>). Nada de token é
+    gravado/logado por nós — só existe na URL durante a troca e é descartado."""
+    return st.html(
+        """<script>
 (function () {
   if (window.location.hash && window.location.hash.indexOf('access_token=') !== -1) {
     var q = {};
@@ -190,9 +190,8 @@ def _injetar_captura_recovery():
     window.location.replace(clean);   // remove o # e o token da URL da aba
   }
 })();
-</script>
-        """,
-        unsafe_allow_html=True)
+</script>""",
+        unsafe_allow_javascript=True)
 
 
 def _qp(key: str):
