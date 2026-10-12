@@ -190,9 +190,15 @@ def _trocar_senha_por_access_token(access_token: str, refresh_token: str, nova_s
 
 def _diagnostico_reset_on() -> bool:
     """Liga o diagnóstico do reset de senha (mostra tamanho capturado, nunca a senha).
-    Ativa só com a variável DIAG_RESET=1 — útil ao investigar; desligado por padrão."""
+    Ativa com a secret DIAG_RESET=1 no deploy (Streamlit → Secrets) ou env DIAG_RESET=1.
+    Desligado por padrão."""
     import os
-    return os.environ.get("DIAG_RESET") == "1"
+    if os.environ.get("DIAG_RESET") == "1":
+        return True
+    try:
+        return str(st.secrets.get("DIAG_RESET")) == "1"
+    except Exception:
+        return False
 
 
 def _injetar_captura_recovery():
