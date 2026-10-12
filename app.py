@@ -127,7 +127,7 @@ def _enviar_link_recuperacao(email: str) -> tuple[bool, str]:
 
 
 def _trocar_senha_por_recovery(code: str, nova_senha: str):
-    """Troca a senha usando o token do link de recuperação e faz login."""
+    """Troca a senha usando o token do link de recuperação (PKCE `?code=`) e faz login."""
     try:
         c = _auth_client()
         c.auth.exchange_code_for_session(code)          # valida o token do link
@@ -142,6 +142,57 @@ def _trocar_senha_por_recovery(code: str, nova_senha: str):
         return rows[0]["perfil"]
     except Exception:
         return None
+
+
+def _trocar_senha_por_access_token(access_token: str, refresh_token: str, nova_senha: str):
+    """Troca a senha quando o link de recuperação veio em formato `#access_token=`
+    (implicit flow). Nada de token e gravado/logado: usamos só em memória e descartamos."""
+    if not access_token:
+        return None
+    try:
+        c = _auth_client()
+        c.auth.set_session(access_token, refresh_token or "")  # monta a sessão de recuperação
+        c.auth.update_user({"password": nova_senha})           # grava a nova senha
+        user = c.auth.get_user().user
+        email = (user.email or "").lower() if user else ""
+        rows = db().table("perfis").select("perfil,nome").eq("email", email).execute().data
+        if not rows:
+            return None
+        st.session_state["auth_user"] = email
+        st.session_state["auth_name"] = (rows[0].get("nome") or "").strip()
+        return rows[0]["perfil"]
+    except Exception:
+        return None
+
+
+def _injetar_captura_recovery():
+    """Injeta um snippet JS que move o token de recuperação do `#` (fragmento,
+    que o servidor do Streamlit não enxerga) para a query `?recovery=...`, e
+    recarrega a página com replace() (sem sujar o histórico do navegador).
+
+    Nada de token fica gravado/logado por nós: só existe na URL durante a troca
+    de senha e é descartado assim que o app lê e usa. HTTPS já garante o caminho."""
+    return st.markdown(
+        """
+<script>
+(function () {
+  if (window.location.hash && window.location.hash.indexOf('access_token=') !== -1) {
+    var q = {};
+    var from = window.location.hash.substring(1).split('&');
+    for (var i = 0; i < from.length; i++) {
+      var kv = from[i].split('=');
+      if (kv.length === 2) q[kv[0]] = kv[1];
+    }
+    var clean = window.location.protocol + '//' + window.location.host
+              + window.location.pathname + '?recovery_access=' + (q['access_token'] || '')
+              + '&recovery_refresh=' + (q['refresh_token'] || '')
+              + '&recovery_type=' + (q['type'] || '');
+    window.location.replace(clean);   // remove o # e o token da URL da aba
+  }
+})();
+</script>
+        """,
+        unsafe_allow_html=True)
 
 
 def _qp(key: str):
@@ -724,8 +775,33 @@ def tela_login():
                         _login_falha()
                         st.error("Senha incorreta")
         else:
+            # Se o link de recuperação veio como #access_token (implicit flow),
+            # o JS abaixo move o token para a URL (query) ANTES deste código rodar.
+            _injetar_captura_recovery()
             qcode = _qp("code")
-            if qcode:  # pessoa clicou no link de recuperação -> define nova senha
+            r_access = _qp("recovery_access")
+            if r_access and _qp("recovery_type") == "recovery":
+                # link de recuperação no formato implicit (#access_token)
+                st.markdown(
+                    '<p style="color:#6d7a72;font-size:13px;margin:-6px 0 6px">'
+                    'Defina sua <b>nova senha</b>:</p>', unsafe_allow_html=True)
+                nova = st.text_input("Nova senha", type="password", key="rec_pass")
+                nova2 = st.text_input("Confirme a nova senha", type="password", key="rec_pass2")
+                confere = bool(nova) and nova == nova2 and len(nova) >= 6
+                if st.button("Salvar nova senha", type="primary", width="stretch"):
+                    if confere:
+                        perfil = _trocar_senha_por_access_token(
+                            r_access, _qp("recovery_refresh") or "", nova)
+                        if perfil:
+                            _login_ok()
+                            st.session_state["perfil"] = perfil
+                            st.rerun()
+                        else:
+                            st.error("Não foi possível concluir. Verifique se o link é "
+                                     "válido/recente e se a conta tem perfil definido.")
+                    else:
+                        st.warning("As senhas não coincidem ou são muito curtas (mínimo 6).")
+            elif qcode:  # pessoa clicou no link de recuperação (PKCE ?code=) -> define nova senha
                 st.markdown(
                     '<p style="color:#6d7a72;font-size:13px;margin:-6px 0 6px">'
                     'Defina sua <b>nova senha</b>:</p>', unsafe_allow_html=True)
