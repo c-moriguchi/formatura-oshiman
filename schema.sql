@@ -119,3 +119,14 @@ create table if not exists public.despesas (
 -- (Opcional) Habilite Row Level Security e políticas se quiser usar anon key
 -- em vez de service_role. Para um app interno de comissão, service_role nos
 -- secrets do Streamlit é aceitável — mas nunca exponha a service key no navegador.
+
+-- ---------- permissões (OBRIGATÓRIO — não pular!) ----------
+-- O app acessa o banco com a service key, que entra como papel "service_role".
+-- Tabelas criadas fora do fluxo normal (ex: recriadas à mão no SQL Editor)
+-- podem perder a permissão desse papel e o app passa a falhar com
+-- "permission denied for table <nome>". Os comandos abaixo são idempotentes
+-- (pode rodar quantas vezes quiser) e cobrem as tabelas de uma vez:
+grant select, insert, update, delete on all tables in schema public to service_role;
+-- ...e garantem que tabelas NOVAS criadas daqui pra frente já nasçam acessíveis:
+alter default privileges in schema public
+  grant select, insert, update, delete on tables to service_role;
